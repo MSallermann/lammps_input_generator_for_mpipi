@@ -306,7 +306,7 @@ def write_lammps_data_file(lammps_data: LammpsData) -> str:
     res = "Lammps data file\n\n"
 
     res += f"{len(lammps_data.atoms)} atoms\n"
-    res += f"{len(AminoID)} atom types\n"
+    res += f"{2*len(AminoID)} atom types\n"
     res += f"{len(lammps_data.bonds)} bonds\n"
     res += f"{1} bond types\n"
     res += "0 angles\n"
@@ -330,7 +330,7 @@ def write_lammps_data_file(lammps_data: LammpsData) -> str:
     res += "\n"
 
     for row in lammps_data.atoms:
-        res += f"{row.atom_id} {row.atom_type} {row.molecule_tag} {row.q} {row.x} {row.y} {row.z}\n"
+        res += f"{row.atom_id} {row.molecule_tag} {row.atom_type} {row.q} {row.x} {row.y} {row.z}\n"
 
     res += "\n"
     res += "Bonds\n"
@@ -347,7 +347,19 @@ def get_lammps_group_script(lammps_data: LammpsData) -> str:
 
     for g in lammps_data.groups:
         res += f"group {g.name} id "
-        res += "".join([f" {p[0]}:{p[1]} " for p in g.id_pairs])
+        res += "".join([f" {p[0]}:{p[1]}" for p in g.id_pairs])
         res += "\n"
+
+    res += (
+        "group nonrigid subtract all "
+        + " ".join([g.name for g in lammps_data.groups])
+        + "\n"
+    )
+
+    for num, g in enumerate(lammps_data.groups):
+        res += f"fix fxnverigid{num} {g.name} rigid/nvt molecule temp ${{T}} ${{T}} 1000.0\n"
+
+    res += "fix fxnve nonrigid nve\n"
+    res += f"fix fxlange nonrigid langevin ${{T}} ${{T}} 1000.0 32784\n"
 
     return res
