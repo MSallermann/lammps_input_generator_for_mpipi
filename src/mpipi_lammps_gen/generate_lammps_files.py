@@ -210,6 +210,31 @@ def generate_lammps_data(
                 return True
         return False
 
+    # mass info
+    mass_section = []
+    for k, v in AminoID.items():
+        mass_section.append(LammpsData.lammps_mass_row(atom_type=v[0], mass_value=v[2]))
+    for k, v in AminoID.items():
+        mass_section.append(
+            LammpsData.lammps_mass_row(atom_type=v[0] + len(AminoID), mass_value=v[2])
+        )
+
+    # box limits
+    residue_positions = prot_data.get_residue_positions()
+
+    x_coords = [r[0] for r in residue_positions]
+    y_coords = [r[1] for r in residue_positions]
+    z_coords = [r[2] for r in residue_positions]
+
+    x_lo = np.min(x_coords) - box_buffer
+    x_hi = np.max(x_coords) + box_buffer
+
+    y_lo = np.min(y_coords) - box_buffer
+    y_hi = np.max(y_coords) + box_buffer
+
+    z_lo = np.min(z_coords) - box_buffer
+    z_hi = np.max(z_coords) + box_buffer
+
     # Fill in the atom section
     atom_section = []
     for idx_residue in range(n_residues):
@@ -220,7 +245,7 @@ def generate_lammps_data(
         atom_type = AminoID[res_info.three_letter][0]
 
         if is_in_globular_domain:
-            atom_type += 20
+            atom_type += len(AminoID)
 
         atom_section.append(
             LammpsData.lammps_atom_row(
@@ -238,7 +263,7 @@ def generate_lammps_data(
     bond_section = []
     bond_id = 1
 
-    # Within globular domains, bonds are skippe
+    # Within globular domains, bonds are skipped
     for idx_residue in range(n_residues - 1):
 
         first_in_glob = check_if_idx_is_in_globular_domain(idx_residue)
@@ -258,25 +283,6 @@ def generate_lammps_data(
                 )
             )
             bond_id += 1
-
-    # mass info
-    mass_section = []
-    for k, v in AminoID.items():
-        mass_section.append(LammpsData.lammps_mass_row(atom_type=v[0], mass_value=v[2]))
-
-    # box limits
-    x_coords = [a.x for a in atom_section]
-    y_coords = [a.y for a in atom_section]
-    z_coords = [a.z for a in atom_section]
-
-    x_lo = np.min(x_coords) - box_buffer
-    x_hi = np.max(x_coords) + box_buffer
-
-    y_lo = np.min(y_coords) - box_buffer
-    y_hi = np.max(y_coords) + box_buffer
-
-    z_lo = np.min(z_coords) - box_buffer
-    z_hi = np.max(z_coords) + box_buffer
 
     # groups
     groups = []
