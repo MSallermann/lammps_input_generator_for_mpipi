@@ -31,7 +31,7 @@ mass = {"H": 1, "C": 12, "O": 16, "N": 14, "P": 31, "S": 32}
 
 
 def decide_globular_domains(
-    plddts: list[float], threshold: float = 70.0
+    plddts: list[float], threshold: float = 70.0, minimum_domain_length: int = 3
 ) -> list[tuple[int, int]]:
 
     res = []
@@ -55,6 +55,11 @@ def decide_globular_domains(
 
     if res[-1][1] is None:
         res[-1][1] = len(plddts) - 1
+
+    # remove domains, which are below the minimum globular domain length
+    for idx, pair in res:
+        if pair[1] - pair[0] < minimum_domain_length:
+            res.pop(idx)
 
     return res
 
