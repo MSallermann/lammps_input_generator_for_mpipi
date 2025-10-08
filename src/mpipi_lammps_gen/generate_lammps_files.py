@@ -204,28 +204,35 @@ def generate_lammps_data(
 
     n_residues = len(prot_data.sequence_three_letter)
 
+    def check_if_idx_is_in_globular_domain(idx: int) -> bool:
+        for glob in globular_domains:
+            if glob[0] <= idx and glob[1] >= idx:
+                return True
+        return False
+
     # Fill in the atom section
     atom_section = []
     for idx_residue in range(n_residues):
         res_info = prot_data.residue_info(idx_residue)
 
+        is_in_globular_domain = check_if_idx_is_in_globular_domain(idx_residue)
+
+        atom_type = AminoID[res_info.three_letter][0]
+
+        if is_in_globular_domain:
+            atom_type += 20
+
         atom_section.append(
             LammpsData.lammps_atom_row(
                 atom_id=idx_residue + 1,
                 molecule_tag=1,
-                atom_type=AminoID[res_info.three_letter][0],
+                atom_type=atom_type,
                 q=0.0,
                 x=res_info.position[0],
                 y=res_info.position[1],
                 z=res_info.position[2],
             )
         )
-
-    def check_if_idx_is_in_globular_domain(idx: int) -> bool:
-        for glob in globular_domains:
-            if glob[0] <= idx and glob[1] >= idx:
-                return True
-        return False
 
     # Compute bond info
     bond_section = []
