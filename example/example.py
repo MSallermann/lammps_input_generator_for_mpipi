@@ -21,7 +21,8 @@ def main():
     with open("lammps.data", "w") as f:
         f.write(data_file_str)
 
-    print(generate_lammps_files.get_lammps_group_script(lammps_data))
+    with open("lammps.lmp", "w") as f:
+        f.write(generate_lammps_files.get_lammps_group_script(lammps_data))
 
 
 if __name__ == "__main__":
