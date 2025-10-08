@@ -365,6 +365,6 @@ def get_lammps_group_script(lammps_data: LammpsData) -> str:
         res += f"fix fxnverigid{num} {g.name} rigid/nvt molecule temp ${{T}} ${{T}} 1000.0\n"
 
     res += "fix fxnve nonrigid nve\n"
-    res += f"fix fxlange nonrigid langevin ${{T}} ${{T}} 1000.0 32784\n"
+    res += "fix fxlange nonrigid langevin ${{T}} ${{T}} 1000.0 32784\n"
 
     return res
