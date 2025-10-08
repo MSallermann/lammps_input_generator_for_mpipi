@@ -345,21 +345,3 @@ def get_lammps_group_script(lammps_data: LammpsData) -> str:
         res += "\n"
 
     return res
-
-
-if __name__ == "__main__":
-
-    cif_path = Path("./example.cif")
-
-    protein_data = parse_cif_from_path(cif_path)
-
-    globular_domains = decide_globular_domains(protein_data.plddts)
-
-    lammps_data = generate_lammps_data(protein_data, globular_domains)
-
-    data_file_str = write_lammps_data_file(lammps_data)
-
-    with open("lammps.data", "w") as f:
-        f.write(data_file_str)
-
-    print(get_lammps_group_script(lammps_data))
