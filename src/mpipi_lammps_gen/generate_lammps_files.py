@@ -32,7 +32,7 @@ mass = {"H": 1, "C": 12, "O": 16, "N": 14, "P": 31, "S": 32}
 
 def decide_globular_domains(
     plddts: list[float], threshold: float = 70.0, minimum_domain_length: int = 3
-) -> list[tuple[int, int]]:
+) -> list[list[int]]:
 
     res = []
 
