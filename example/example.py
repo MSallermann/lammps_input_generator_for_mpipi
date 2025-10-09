@@ -1,9 +1,9 @@
-from mpipi_lammps_gen import generate_lammps_files
 from pathlib import Path
+
+from mpipi_lammps_gen import generate_lammps_files
 
 
 def main():
-
     cif_path = Path("./example.cif")
 
     protein_data = generate_lammps_files.parse_cif_from_path(cif_path)
@@ -18,10 +18,10 @@ def main():
 
     data_file_str = generate_lammps_files.write_lammps_data_file(lammps_data)
 
-    with open("lammps.data", "w") as f:
+    with Path("lammps.data").open("w") as f:
         f.write(data_file_str)
 
-    with open("lammps.lmp", "w") as f:
+    with Path("lammps.lmp").open("w") as f:
         f.write(generate_lammps_files.get_lammps_group_script(lammps_data))
 
 

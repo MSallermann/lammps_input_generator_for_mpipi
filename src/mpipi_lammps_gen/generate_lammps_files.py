@@ -1,6 +1,7 @@
-from pathlib import Path
 from dataclasses import dataclass
-from collections import namedtuple
+from pathlib import Path
+from typing import NamedTuple
+
 import numpy as np
 
 # type, sigma, mass
@@ -33,7 +34,6 @@ mass = {"H": 1, "C": 12, "O": 16, "N": 14, "P": 31, "S": 32}
 def decide_globular_domains(
     plddts: list[float], threshold: float = 70.0, minimum_domain_length: int = 3
 ) -> list[list[int]]:
-
     res = []
 
     for idx, p in enumerate(plddts):
@@ -44,11 +44,12 @@ def decide_globular_domains(
             # This is the case if either:
             #   - there is not a single domain recorded yet
             #   - or the last domain is already closed (second idx not None)
-            if len(res) == 0 or res[-1][1] is not None:
-                if (
-                    idx != len(plddts) - 1 and plddts[idx + 1] >= threshold
-                ):  # We only "open" a new domain if we are guaranteed that it does not consist of only a single residue
-                    res.append([idx, None])
+            if (
+                (len(res) == 0 or res[-1][1] is not None)
+                and idx != len(plddts) - 1
+                and plddts[idx + 1] >= threshold
+            ):  # We only "open" a new domain if we are guaranteed that it does not consist of only a single residue
+                res.append([idx, None])
         # If the current idx is below the threshold, we have to decide if a globular domain ended on the index just before the current one
         elif len(res) > 0 and res[-1][1] is None and idx != idx - 1:
             res[-1][1] = idx - 1
@@ -57,7 +58,7 @@ def decide_globular_domains(
         res[-1][1] = len(plddts) - 1
 
     # remove domains, which are below the minimum globular domain length
-    for idx, pair in res:
+    for idx, pair in enumerate(res):
         if pair[1] - pair[0] < minimum_domain_length:
             res.pop(idx)
 
@@ -77,7 +78,6 @@ class ResidueInfo:
 
 @dataclass
 class ProteinData:
-
     atom_xyz: list[list[tuple[float, float, float]]]
     atom_types: list[list[str]]
 
@@ -88,7 +88,6 @@ class ProteinData:
     def compute_residue_position(
         self, types: list[str], xyz: list[tuple[float, float, float]]
     ) -> tuple[float, float, float]:
-
         idx_ca = types.index("CA")
         return xyz[idx_ca]
 
@@ -108,14 +107,13 @@ class ProteinData:
     def get_residue_positions(self) -> list[tuple[float, float, float]]:
         residue_positions = []
 
-        for xyz_list, types in zip(self.atom_xyz, self.atom_types):
+        for xyz_list, types in zip(self.atom_xyz, self.atom_types, strict=False):
             residue_positions.append(self.compute_residue_position(types, xyz_list))
 
         return residue_positions
 
 
 def parse_cif(cif_text: str) -> ProteinData:
-
     plddt_list = []
 
     atom_xyz = []
@@ -157,10 +155,12 @@ def parse_cif(cif_text: str) -> ProteinData:
 
         # Two small sanity checks
         if residue_number < 1:
-            raise Exception("Parsed a residue number which is smaller than 1")
+            msg = "Parsed a residue number which is smaller than 1"
+            raise Exception(msg)
 
         if plddt < 0.0 or plddt > 100.0:
-            raise Exception("Parsed a plddt which is not between 1 and 100")
+            msg = "Parsed a plddt which is not between 1 and 100"
+            raise Exception(msg)
 
     return ProteinData(
         atom_xyz=atom_xyz,
@@ -172,29 +172,40 @@ def parse_cif(cif_text: str) -> ProteinData:
 
 
 def parse_cif_from_path(cif_path: Path) -> ProteinData:
-    with open(cif_path) as f:
+    with cif_path.open() as f:
         cif_text = f.read()
         return parse_cif(cif_text)
 
 
 @dataclass
 class LammpsData:
-    lammps_atom_row = namedtuple(
-        typename="atom_row",
-        field_names=["atom_id", "molecule_tag", "atom_type", "q", "x", "y", "z"],
-    )
-    lammps_bond_row = namedtuple(
-        typename="bond_row", field_names=["bond_id", "bond_type", "atom_1", "atom_2"]
-    )
-    lammps_mass_row = namedtuple(
-        typename="mass_row", field_names=["atom_type", "mass_value"]
-    )
-    lammps_groups = namedtuple(typename="groups", field_names=["name", "id_pairs"])
+    class AtomRow(NamedTuple):
+        atom_id: int
+        molecule_tag: int
+        atom_type: int
+        q: float
+        x: float
+        y: float
+        z: float
 
-    atoms: list[lammps_atom_row]
-    bonds: list[lammps_bond_row]
-    masses: list[lammps_mass_row]
-    groups: list[lammps_groups]
+    class BondRow(NamedTuple):
+        bond_id: int
+        bond_type: int
+        atom_1: int
+        atom_2: int
+
+    class MassRow(NamedTuple):
+        atom_type: int
+        mass_value: float
+
+    class Group(NamedTuple):
+        name: str
+        id_pairs: list[tuple[int, int]]
+
+    atoms: list[AtomRow]
+    bonds: list[BondRow]
+    masses: list[MassRow]
+    groups: list[Group]
 
     x_lims: tuple[float, float]
     y_lims: tuple[float, float]
@@ -206,23 +217,20 @@ def generate_lammps_data(
     globular_domains: list[tuple[int, int]],
     box_buffer: float = 20.0,
 ) -> LammpsData:
-
     n_residues = len(prot_data.sequence_three_letter)
 
     def check_if_idx_is_in_globular_domain(idx: int) -> bool:
-        for glob in globular_domains:
-            if glob[0] <= idx and glob[1] >= idx:
-                return True
-        return False
+        return any(glob[0] <= idx and glob[1] >= idx for glob in globular_domains)
 
     # mass info
     mass_section = []
-    for k, v in AminoID.items():
-        mass_section.append(LammpsData.lammps_mass_row(atom_type=v[0], mass_value=v[2]))
-    for k, v in AminoID.items():
-        mass_section.append(
-            LammpsData.lammps_mass_row(atom_type=v[0] + len(AminoID), mass_value=v[2])
-        )
+
+    mass_section.extend(
+        LammpsData.MassRow(atom_type=v[0], mass_value=v[2]) for v in AminoID.values()
+    )
+    mass_section.extend(
+        LammpsData.MassRow(atom_type=v[0], mass_value=v[2]) for v in AminoID.values()
+    )
 
     # box limits
     residue_positions = prot_data.get_residue_positions()
@@ -253,7 +261,7 @@ def generate_lammps_data(
             atom_type += len(AminoID)
 
         atom_section.append(
-            LammpsData.lammps_atom_row(
+            LammpsData.AtomRow(
                 atom_id=idx_residue + 1,
                 molecule_tag=1,
                 atom_type=atom_type,
@@ -270,30 +278,28 @@ def generate_lammps_data(
 
     # Within globular domains, bonds are skipped
     for idx_residue in range(n_residues - 1):
-
         first_in_glob = check_if_idx_is_in_globular_domain(idx_residue)
         second_in_glob = check_if_idx_is_in_globular_domain(idx_residue + 1)
 
         # if both residues are in a globular domain we skip the bond
         if first_in_glob and second_in_glob:
             continue
-        else:
-            # in this case we are either in an IDR or we are connecting a globular domain to an IDR
-            bond_section.append(
-                LammpsData.lammps_bond_row(
-                    bond_id=bond_id,
-                    bond_type=1,
-                    atom_1=idx_residue + 1,
-                    atom_2=idx_residue + 2,
-                )
+        # in this case we are either in an IDR or we are connecting a globular domain to an IDR
+        bond_section.append(
+            LammpsData.BondRow(
+                bond_id=bond_id,
+                bond_type=1,
+                atom_1=idx_residue + 1,
+                atom_2=idx_residue + 2,
             )
-            bond_id += 1
+        )
+        bond_id += 1
 
     # groups
     groups = []
     for idx, domain in enumerate(globular_domains):
         id_pairs = [(domain[0] + 1, domain[1] + 1)]
-        groups.append(LammpsData.lammps_groups(name=f"CD{idx+1}", id_pairs=id_pairs))
+        groups.append(LammpsData.Group(name=f"CD{idx + 1}", id_pairs=id_pairs))
 
     return LammpsData(
         atoms=atom_section,
@@ -307,11 +313,10 @@ def generate_lammps_data(
 
 
 def write_lammps_data_file(lammps_data: LammpsData) -> str:
-
     res = "Lammps data file\n\n"
 
     res += f"{len(lammps_data.atoms)} atoms\n"
-    res += f"{2*len(AminoID)} atom types\n"
+    res += f"{2 * len(AminoID)} atom types\n"
     res += f"{len(lammps_data.bonds)} bonds\n"
     res += f"{1} bond types\n"
     res += "0 angles\n"
