@@ -1,3 +1,4 @@
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import NamedTuple
@@ -32,30 +33,37 @@ mass = {"H": 1, "C": 12, "O": 16, "N": 14, "P": 31, "S": 32}
 
 
 def decide_globular_domains(
-    plddts: list[float], threshold: float = 70.0, minimum_domain_length: int = 3
-) -> list[list[int]]:
+    plddts: Iterable[float], threshold: float = 70.0, minimum_domain_length: int = 3
+) -> list[tuple[int, int]]:
     res = []
 
-    for idx, p in enumerate(plddts):
-        # Over the threshold -> part of a globular domain
-        if p >= threshold:
-            # First we have to decide, if a globular domain "starts" at the current idx
-            # If this is the case we add a new pair with the current index as start and the end undertermined (None)
-            # This is the case if either:
-            #   - there is not a single domain recorded yet
-            #   - or the last domain is already closed (second idx not None)
-            if (
-                (len(res) == 0 or res[-1][1] is not None)
-                and idx != len(plddts) - 1
-                and plddts[idx + 1] >= threshold
-            ):  # We only "open" a new domain if we are guaranteed that it does not consist of only a single residue
-                res.append([idx, None])
-        # If the current idx is below the threshold, we have to decide if a globular domain ended on the index just before the current one
-        elif len(res) > 0 and res[-1][1] is None and idx != idx - 1:
-            res[-1][1] = idx - 1
+    in_globular_domain = [p > threshold for p in plddts]
+    n_res = len(in_globular_domain)
 
-    if res[-1][1] is None:
-        res[-1][1] = len(plddts) - 1
+    # Indices where value changes from False to True
+    start_indices = [
+        i
+        for i in range(1, n_res)
+        if not in_globular_domain[i - 1] and in_globular_domain[i]
+    ]
+
+    # Indices where value changes from True to False
+    end_indices = [
+        i
+        for i in range(n_res - 1)
+        if in_globular_domain[i] and not in_globular_domain[i + 1]
+    ]
+
+    # Special checks for the first and last index, since we cannot detect them based on changes from False to True
+    if in_globular_domain[0]:
+        start_indices.insert(0, 0)
+
+    if in_globular_domain[-1]:
+        end_indices.append(n_res - 1)
+
+    assert len(start_indices) == len(end_indices)
+
+    res = list(zip(start_indices, end_indices, strict=True))
 
     # remove domains, which are below the minimum globular domain length
     for idx, pair in enumerate(res):
@@ -214,7 +222,7 @@ class LammpsData:
 
 def generate_lammps_data(
     prot_data: ProteinData,
-    globular_domains: list[tuple[int, int]],
+    globular_domains: Iterable[tuple[int, int]],
     box_buffer: float = 20.0,
 ) -> LammpsData:
     n_residues = len(prot_data.sequence_three_letter)
