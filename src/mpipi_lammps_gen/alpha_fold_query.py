@@ -59,11 +59,11 @@ def parse_plddt_from_cif(cif_text: str) -> list[float]:
 
 class AlphaFoldQueryResult(NamedTuple):
     http_status: int
-    accession: str
+    accession: str | None
     sequence: str | None
-    plddts: list[float] | None
-    cif_text: str | None
-    alpha_fold_data: dict[str, Any] | None
+    plddts: list[int]
+    cif_text: str
+    alpha_fold_data: dict[str, Any]
 
 
 def query_alphafold(
