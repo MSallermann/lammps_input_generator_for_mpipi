@@ -1,17 +1,24 @@
+import logging
 import sys
 from pathlib import Path
 
 import tomllib
+from PySide6.QtCore import Qt
 from PySide6.QtGui import QAction, QIcon, QKeySequence
 from PySide6.QtWidgets import (
     QApplication,
+    QDockWidget,
     QMainWindow,
     QSplitter,
     QStatusBar,
     QWidget,
 )
+from rich.logging import RichHandler
 
-from . import navigator_widget, pipeline_widget
+from . import log_widget, navigator_widget, pipeline_widget
+
+logger = logging.getLogger(__name__)
+
 
 DEFAULT_SETTINGS_PATH = Path(__file__).parent / "default_settings.toml"
 with DEFAULT_SETTINGS_PATH.open("rb") as f:
@@ -24,18 +31,16 @@ class MainWindow(QMainWindow):
 
         self.setWindowTitle(DEFAULT_SETTINGS.get("MainWindow.title", ""))
 
-        pipeline = pipeline_widget.PipelineWidget()
-        navigator = navigator_widget.NavigatorWidget(pipeline_widget=pipeline)
+        self.pipeline = pipeline_widget.PipelineWidget()
+        self.navigator = navigator_widget.NavigatorWidget(pipeline_widget=self.pipeline)
 
-        central = QWidget()
+        self.central = QWidget()
+        self.central = QSplitter()
+        self.central.addWidget(self.navigator)
+        self.central.addWidget(self.pipeline)
+        self.central.setSizes([200, 600])  # left pane 200px, right pane 600px
 
-        central = QSplitter()
-        central.addWidget(navigator)
-        central.addWidget(pipeline)
-        central.setStretchFactor(0, 1)
-        central.setStretchFactor(1, 4)
-
-        self.setCentralWidget(central)
+        self.setCentralWidget(self.central)
 
         self.act_open = QAction(QIcon.fromTheme("document-open"), "Open…", self)
         self.act_open.setShortcut(QKeySequence.StandardKey.Open)
@@ -49,6 +54,16 @@ class MainWindow(QMainWindow):
 
         self.menuBar().addAction(self.act_open)
         self.menuBar().addAction(self.act_exit)
+
+        self.log_widget = log_widget.LogWidget()
+        self.log_widget.setReadOnly(True)
+
+        log_dock = QDockWidget("Log", self)
+        log_dock.setWidget(self.log_widget)
+        log_dock.setAllowedAreas(
+            Qt.DockWidgetArea.BottomDockWidgetArea | Qt.DockWidgetArea.TopDockWidgetArea
+        )
+        self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, log_dock)
 
         self.status = QStatusBar()
         self.setStatusBar(self.status)
@@ -66,6 +81,15 @@ def main():
 
     # Create a Qt widget, which will be our window.
     window = MainWindow()
+
+    logging.basicConfig(
+        level=logging.INFO,
+        handlers=[
+            log_widget.LogWidgetHandler(window.log_widget, level=logging.INFO),
+            RichHandler(level=logging.INFO),
+        ],
+    )
+
     window.show()
 
     # Start the event loop.
