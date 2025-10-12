@@ -1,6 +1,6 @@
 import logging
 import time
-from collections.abc import Generator, Sequence
+from collections.abc import Generator, Iterable
 from typing import Any, NamedTuple
 
 import requests
@@ -59,11 +59,11 @@ def parse_plddt_from_cif(cif_text: str) -> list[float]:
 
 class AlphaFoldQueryResult(NamedTuple):
     http_status: int
-    accession: str
+    accession: str | None
     sequence: str | None
-    plddts: list[float] | None
-    cif_text: str | None
-    alpha_fold_data: dict[str, Any] | None
+    plddts: list[int]
+    cif_text: str
+    alpha_fold_data: dict[str, Any]
 
 
 def query_alphafold(
@@ -139,7 +139,7 @@ def query_alphafold(
 
 
 def query_alphafold_bulk(
-    accession_list: Sequence[str], **kwargs
+    accession_list: Iterable[str], **kwargs
 ) -> Generator[AlphaFoldQueryResult]:
     """For a sequence of accessions, return a generator to query the alpha fold database."""
 
