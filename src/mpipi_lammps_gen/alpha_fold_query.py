@@ -60,10 +60,10 @@ def parse_plddt_from_cif(cif_text: str) -> list[float]:
 class AlphaFoldQueryResult(NamedTuple):
     http_status: int
     accession: str
-    sequence: str
-    plddts: list[int]
-    alpha_fold_data: dict[str, Any]
-    cif_text: str
+    sequence: str | None
+    plddts: list[float] | None
+    cif_text: str | None
+    alpha_fold_data: dict[str, Any] | None
 
 
 def query_alphafold(
@@ -132,7 +132,7 @@ def query_alphafold(
                             raise Exception(msg)
 
     return AlphaFoldQueryResult(
-        response_code_alpha_fold, accession, sequence, plddts, alpha_fold_data, cif_text
+        response_code_alpha_fold, accession, sequence, plddts, cif_text, alpha_fold_data
     )
 
 
@@ -156,7 +156,8 @@ if __name__ == "__main__":
     print(res.plddts)
 
     with Path("ex.cif").open("w") as f:
-        f.write(res.cif_text)
+        if res.cif_text is not None:
+            f.write(res.cif_text)
 
     print(res.cif_text)
     print(res.alpha_fold_data)
