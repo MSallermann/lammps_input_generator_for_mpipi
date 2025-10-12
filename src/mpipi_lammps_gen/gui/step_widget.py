@@ -1,7 +1,7 @@
 import enum
 
 from PySide6.QtCore import Signal
-from PySide6.QtWidgets import QLabel, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QWidget
 
 
 class StepState(enum.Enum):
@@ -22,10 +22,9 @@ class StepWidget(QWidget):
         self._title = title
         self._description = description
 
-        layout = QVBoxLayout()
-
-        self.setLayout(layout)
-        layout.addWidget(QLabel(self.title()))
+        # layout = QVBoxLayout()
+        # self.setLayout(layout)
+        # layout.addWidget(QLabel(self.title()))
 
     def title(self) -> str:
         return self._title

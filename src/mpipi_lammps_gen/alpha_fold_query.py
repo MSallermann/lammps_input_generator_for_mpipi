@@ -84,6 +84,8 @@ def query_alphafold(
     alpha_fold_data: dict[str, Any] | None = None
     cif_text: str | None = None
 
+    logger.info(f"Accessing ID {accession}")
+
     r = get_with_retries(url, retries=retries, backoff_time=5, timeout=timeout)
 
     response_code_alpha_fold = r.status_code
