@@ -1,4 +1,7 @@
 import logging
+import queue
+import threading
+import time
 
 from PySide6.QtWidgets import (
     QFormLayout,
@@ -12,7 +15,10 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from mpipi_lammps_gen.alpha_fold_query import AlphaFoldQueryResult, query_alphafold_bulk
+from mpipi_lammps_gen.alpha_fold_query import (
+    AlphaFoldQueryResult,
+    query_alphafold,
+)
 
 from . import step_widget
 
@@ -105,35 +111,60 @@ class QueryAlphaFoldWidget(step_widget.StepWidget):
 
         layout = QVBoxLayout()
         self.setLayout(layout)
+
+        # Where the uniprot id's are displayed
         self.id_list_widget = IDListWidget()
         layout.addWidget(self.id_list_widget)
 
-        self.parse_button = QPushButton("Query")
-        self.parse_button.pressed.connect(self.run_query)
-        layout.addWidget(self.parse_button)
+        # Button to start the query
+        self.query_button = QPushButton("Run Query")
+        self.query_button.pressed.connect(self.run_query)
+        layout.addWidget(self.query_button)
 
-        # Where the uniprot id's are displayed
-        self.parsed_ids = QListWidget()
-        self.parsed_ids.currentRowChanged.connect(self.update_query_display)
-        layout.addWidget(self.parsed_ids)
+        # Queried Ids
+        self.queried_ids = QListWidget()
+        self.queried_ids.currentRowChanged.connect(self.update_query_display)
+        layout.addWidget(self.queried_ids)
 
         self.results_widget = QueryDisplayWidget()
         layout.addWidget(self.results_widget)
 
+        self._query_queue = queue.Queue()
+        self._query_thread = threading.Thread(target=self.query, daemon=True)
+        self._query_thread.start()
+
+    def query(self):
+        while True:
+            while not self._query_queue.empty():
+                accession = self._query_queue.get()
+                res = query_alphafold(
+                    accession, timeout=self.timeout, retries=self.retries
+                )
+                self.query_results.append(res)
+                self.queried_ids.addItem(accession)
+
+            time.sleep(0.5)
+
     def run_query(self):
         logger.info("Running alpha fold query")
 
-        self.parsed_ids.clear()
+        # Clear results
+        self.queried_ids.clear()
         self.query_results.clear()
 
-        for q in query_alphafold_bulk(
-            accession_list=self.id_list_widget.ids,
-            timeout=self.timeout,
-            retries=self.retries,
-        ):
-            self.query_results.append(q)
-            if q.accession is not None:
-                self.parsed_ids.addItem(q.accession)
+        # Empty the query queue
+        self._query_queue = queue.Queue()
+
+        # Fill the query queue
+        [self._query_queue.put(cur_id) for cur_id in self.id_list_widget.ids]
+
+        # for q in query_alphafold_bulk(
+        #     accession_list=self.id_list_widget.ids,
+        #
+        # ):
+        #     self.query_results.append(q)
+        #     if q.accession is not None:
+        #         self.parsed_ids.addItem(q.accession)
 
     def update_query_display(self, idx: int):
         self.results_widget.update_data(self.query_results[idx])
