@@ -3,7 +3,10 @@ import queue
 import threading
 import time
 
+from PySide6.QtCore import QSize
+from PySide6.QtGui import QDropEvent
 from PySide6.QtWidgets import (
+    QDialog,
     QFormLayout,
     QGridLayout,
     QLabel,
@@ -25,6 +28,34 @@ from . import step_widget
 logger = logging.getLogger(__name__)
 
 
+class IDListTextEdit(QPlainTextEdit):
+    def __init__(self):
+        super().__init__()
+        self.setAcceptDrops(True)
+
+    def dropEvent(self, event: QDropEvent):  # noqa: N802
+        mime = event.mimeData()
+
+        # If files were dropped
+        if mime.hasUrls():
+            file_paths = [url.toLocalFile() for url in mime.urls()]
+
+            logger.info(f"Opening {file_paths}")
+
+            if len(file_paths) > 1:
+                dialog = QDialog(modal=True)
+                dialog.show()
+            else:
+                self.appendPlainText("\n".join(file_paths))
+
+        # If text was dropped
+        elif mime.hasText():
+            text = mime.text()
+            self.insertPlainText(text)
+
+        event.acceptProposedAction()
+
+
 class IDListWidget(QWidget):
     def __init__(self):
         super().__init__()
@@ -34,7 +65,12 @@ class IDListWidget(QWidget):
         self.setLayout(layout)
 
         # Where the uniprot id's are pasted
-        self.uniprot_ids_input = QPlainTextEdit()
+        self.uniprot_ids_input = IDListTextEdit()
+        self.uniprot_ids_input.setBaseSize(QSize(-1, 50))
+        self.uniprot_ids_input.setPlaceholderText(
+            "Enter Uniprot IDs manually (separated by newlines) or drag and drop a file (.csv, .parquet or plain text)"
+        )
+        # self.uniprot_ids_input.(self.handle_drop_event)
         self.uniprot_ids_input.textChanged.connect(self.try_to_parse_ids)
         layout.addWidget(self.uniprot_ids_input, 0, 0)
 
