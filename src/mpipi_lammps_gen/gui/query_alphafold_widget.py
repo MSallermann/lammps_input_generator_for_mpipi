@@ -2,16 +2,21 @@ import logging
 import queue
 import threading
 import time
+from pathlib import Path
 
+import polars as pl
 from PySide6.QtCore import QSize
 from PySide6.QtGui import QDropEvent
 from PySide6.QtWidgets import (
+    QComboBox,
     QDialog,
+    QDialogButtonBox,
     QFormLayout,
     QGridLayout,
     QLabel,
     QLineEdit,
     QListWidget,
+    QMessageBox,
     QPlainTextEdit,
     QPushButton,
     QVBoxLayout,
@@ -28,6 +33,40 @@ from . import step_widget
 logger = logging.getLogger(__name__)
 
 
+class DataFrameColumnSelect(QDialog):
+    def __init__(self, df: pl.DataFrame, parent: QWidget | None = None) -> None:
+        super().__init__(parent=parent)
+        self.df = df
+        self.setWindowTitle("Select UniProt Column")
+
+        layout = QVBoxLayout(self)
+
+        # Instruction text
+        text = QPlainTextEdit()
+        text.setReadOnly(True)
+        text.setPlainText("Please select the column with the UniProt IDs:")
+        layout.addWidget(text)
+
+        # Combo box with column names
+        self.combobox = QComboBox()
+        self.combobox.addItems(self.df.columns)
+        layout.addWidget(self.combobox)
+
+        # OK / Cancel buttons
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+        )
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+
+    def selected_column(self) -> str | None:
+        """Return the selected column name, or None if cancelled."""
+        if self.result() == QDialog.DialogCode.Accepted:
+            return self.combobox.currentText()
+        return None
+
+
 class IDListTextEdit(QPlainTextEdit):
     def __init__(self):
         super().__init__()
@@ -38,20 +77,39 @@ class IDListTextEdit(QPlainTextEdit):
 
         # If files were dropped
         if mime.hasUrls():
-            file_paths = [url.toLocalFile() for url in mime.urls()]
+            file_path = Path(next(url.toLocalFile() for url in mime.urls()))
 
-            logger.info(f"Opening {file_paths}")
+            logger.info(f"Opening {file_path}")
 
-            if len(file_paths) > 1:
-                dialog = QDialog(modal=True)
-                dialog.show()
+            if file_path.suffix.lower() in [".csv", ".txt"]:
+                self.df = pl.read_csv(file_path)
+            elif file_path.suffix.lower() == ".parquet":
+                self.df = pl.read_parquet(file_path)
             else:
-                self.appendPlainText("\n".join(file_paths))
+                msg = QMessageBox(parent=self)
+                msg.setIcon(QMessageBox.Icon.Critical)  # 👈 sets the error icon
+                msg.setWindowTitle("Incompatible file ending")
+                msg.setText(f"The file {file_path} has an unsupported suffix.")
+                msg.setInformativeText("Supported suffixes: [.txt, .csv, .parquet]")
+                msg.setStandardButtons(QMessageBox.StandardButton.Ok)
+                msg.exec()
+                return
+
+            col_select_dialog = DataFrameColumnSelect(self.df, parent=self)
+            if col_select_dialog.exec():
+                column = col_select_dialog.selected_column()
+                if column is not None:
+                    logger.info(f"User selected column: {column}")
+                    [self.appendPlainText(s) for s in self.df[column]]
+                else:
+                    logger.info("No column selected.")
+            else:
+                logger.info("User canceled.")
 
         # If text was dropped
         elif mime.hasText():
             text = mime.text()
-            self.insertPlainText(text)
+            self.setPlainText(text)
 
         event.acceptProposedAction()
 
@@ -68,7 +126,7 @@ class IDListWidget(QWidget):
         self.uniprot_ids_input = IDListTextEdit()
         self.uniprot_ids_input.setBaseSize(QSize(-1, 50))
         self.uniprot_ids_input.setPlaceholderText(
-            "Enter Uniprot IDs manually (separated by newlines) or drag and drop a file (.csv, .parquet or plain text)"
+            "Enter Uniprot IDs manually (separated by newlines) or drag and drop a file (csv or parquet)"
         )
         # self.uniprot_ids_input.(self.handle_drop_event)
         self.uniprot_ids_input.textChanged.connect(self.try_to_parse_ids)
@@ -173,9 +231,15 @@ class QueryAlphaFoldWidget(step_widget.StepWidget):
         while True:
             while not self._query_queue.empty():
                 accession = self._query_queue.get()
-                res = query_alphafold(
-                    accession, timeout=self.timeout, retries=self.retries
-                )
+
+                try:
+                    res = query_alphafold(
+                        accession, timeout=self.timeout, retries=self.retries
+                    )
+                except Exception as e:
+                    logger.exception(e)
+                    continue
+
                 self.query_results.append(res)
                 self.queried_ids.addItem(accession)
 
