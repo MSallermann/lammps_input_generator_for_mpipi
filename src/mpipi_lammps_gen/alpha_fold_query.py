@@ -1,6 +1,6 @@
 import logging
 import time
-from collections.abc import Generator, Sequence
+from collections.abc import Generator, Iterable
 from typing import Any, NamedTuple
 
 import requests
@@ -137,7 +137,7 @@ def query_alphafold(
 
 
 def query_alphafold_bulk(
-    accession_list: Sequence[str], **kwargs
+    accession_list: Iterable[str], **kwargs
 ) -> Generator[AlphaFoldQueryResult]:
     """For a sequence of accessions, return a generator to query the alpha fold database."""
 

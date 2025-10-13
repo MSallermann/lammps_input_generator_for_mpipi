@@ -33,7 +33,10 @@ mass = {"H": 1, "C": 12, "O": 16, "N": 14, "P": 31, "S": 32}
 
 
 def decide_globular_domains(
-    plddts: Iterable[float], threshold: float = 70.0, minimum_domain_length: int = 3
+    plddts: Iterable[float],
+    threshold: float = 70.0,
+    minimum_domain_length: int = 3,
+    minimum_idr_length: int = 3,
 ) -> list[tuple[int, int]]:
     res = []
 
@@ -65,10 +68,31 @@ def decide_globular_domains(
 
     res = list(zip(start_indices, end_indices, strict=True))
 
+    # remove idrs, which are below the minimum idr length by "merging" domains
+    indices_to_remove = []
+
+    for idx in range(len(res) - 1):
+        pair1 = res[idx]
+        pair2 = res[idx + 1]
+
+        if pair2[0] - pair1[1] - 1 < minimum_idr_length:
+            indices_to_remove.append(idx)
+            # we just set both pairs to the new "merged" value
+            res[idx] = (pair1[0], pair2[1])
+            res[idx + 1] = (pair1[0], pair2[1])
+
+    for i in sorted(indices_to_remove, reverse=True):
+        res.pop(i)
+
     # remove domains, which are below the minimum globular domain length
+    indices_to_remove = []
     for idx, pair in enumerate(res):
-        if pair[1] - pair[0] < minimum_domain_length:
-            res.pop(idx)
+        if pair[1] - pair[0] + 1 < minimum_domain_length:
+            indices_to_remove.append(idx)
+
+    # iterate in reverse order, because then the lower indices do not change due to the `pop`
+    for i in sorted(indices_to_remove, reverse=True):
+        res.pop(i)
 
     return res
 
