@@ -37,14 +37,14 @@ class DataFrameColumnSelect(QDialog):
     def __init__(self, df: pl.DataFrame, parent: QWidget | None = None) -> None:
         super().__init__(parent=parent)
         self.df = df
-        self.setWindowTitle("Select UniProt Column")
+        self.setWindowTitle("Select column")
 
         layout = QVBoxLayout(self)
 
         # Instruction text
         text = QPlainTextEdit()
         text.setReadOnly(True)
-        text.setPlainText("Please select the column with the UniProt IDs:")
+        text.setPlainText("Please select the column with the UniProt IDs.")
         layout.addWidget(text)
 
         # Combo box with column names
@@ -68,6 +68,8 @@ class DataFrameColumnSelect(QDialog):
 
 
 class IDListTextEdit(QPlainTextEdit):
+    """The widget to enter the IDs, which are to be queried"""
+
     def __init__(self):
         super().__init__()
         self.setAcceptDrops(True)
@@ -100,6 +102,7 @@ class IDListTextEdit(QPlainTextEdit):
                 column = col_select_dialog.selected_column()
                 if column is not None:
                     logger.info(f"User selected column: {column}")
+                    self.clear()
                     [self.appendPlainText(s) for s in self.df[column]]
                 else:
                     logger.info("No column selected.")
@@ -115,6 +118,8 @@ class IDListTextEdit(QPlainTextEdit):
 
 
 class IDListWidget(QWidget):
+    """Widget which ties together the input of"""
+
     def __init__(self):
         super().__init__()
         self.ids: set[str] = set()
@@ -135,7 +140,6 @@ class IDListWidget(QWidget):
         # Where the stats for each query are displayed
         stats_container = QWidget()
         layout.addWidget(stats_container, 1, 0)
-
         stats_layout = QGridLayout()
         stats_container.setLayout(stats_layout)
         self.number_of_ids = QLabel("No. IDs: 0")
@@ -151,6 +155,8 @@ class IDListWidget(QWidget):
 
 
 class QueryDisplayWidget(QWidget):
+    """Display the results of a single query"""
+
     def __init__(self):
         super().__init__()
 
@@ -212,7 +218,7 @@ class QueryAlphaFoldWidget(step_widget.StepWidget):
 
         # Button to start the query
         self.query_button = QPushButton("Run Query")
-        self.query_button.pressed.connect(self.run_query)
+        self.query_button.pressed.connect(self.on_query_button_pressed)
         layout.addWidget(self.query_button)
 
         # Queried Ids
@@ -224,10 +230,11 @@ class QueryAlphaFoldWidget(step_widget.StepWidget):
         layout.addWidget(self.results_widget)
 
         self._query_queue = queue.Queue()
-        self._query_thread = threading.Thread(target=self.query, daemon=True)
+        self._query_thread = threading.Thread(target=self._query_loop, daemon=True)
         self._query_thread.start()
 
-    def query(self):
+    def _query_loop(self):
+        """This function runs in a background thread and continuously queries for ids which get pushed to the queue"""
         while True:
             while not self._query_queue.empty():
                 accession = self._query_queue.get()
@@ -245,7 +252,7 @@ class QueryAlphaFoldWidget(step_widget.StepWidget):
 
             time.sleep(0.5)
 
-    def run_query(self):
+    def on_query_button_pressed(self):
         logger.info("Running alpha fold query")
 
         # Clear results
@@ -257,14 +264,6 @@ class QueryAlphaFoldWidget(step_widget.StepWidget):
 
         # Fill the query queue
         [self._query_queue.put(cur_id) for cur_id in self.id_list_widget.ids]
-
-        # for q in query_alphafold_bulk(
-        #     accession_list=self.id_list_widget.ids,
-        #
-        # ):
-        #     self.query_results.append(q)
-        #     if q.accession is not None:
-        #         self.parsed_ids.addItem(q.accession)
 
     def update_query_display(self, idx: int):
         self.results_widget.update_data(self.query_results[idx])
