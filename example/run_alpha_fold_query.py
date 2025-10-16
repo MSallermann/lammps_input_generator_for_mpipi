@@ -74,7 +74,7 @@ if __name__ == "__main__":
         level=logging.INFO, format=FORMAT, datefmt="[%X]", handlers=[RichHandler()]
     )
 
-    ids_to_query = pl.read_parquet("./data_idrs.parquet")["uniprot_id"]
+    ids_to_query = pl.read_parquet("./data_idrs.parquet").sample(8000)["uniprot_id"]
 
     output_path = Path("./query_results.parquet")
 
