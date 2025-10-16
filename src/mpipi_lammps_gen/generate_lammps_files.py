@@ -442,7 +442,7 @@ def get_lammps_nvt_command(
         res += f"fix fxnverigid{num} {g.name} rigid/nvt molecule temp {temp} {temp} 1000.0\n"
 
     res += "fix fxnve nonrigid nve\n"
-    res += f"fix fxlange nonrigid langevin {temp} ${temp} 1000.0 32784\n"
+    res += f"fix fxlange nonrigid langevin {temp} {temp} 1000.0 32784\n"
 
     # run
     res += f"timestep {timestep}\n"
@@ -452,7 +452,7 @@ def get_lammps_nvt_command(
     for num, _ in enumerate(lammps_data.groups):
         res += f"unfix fxnverigid{num}\n"
 
-    res += "unfix fxnve nonrigid nve\n"
-    res += f"unfix fxlange nonrigid langevin {temp} {temp} 1000.0 32784\n"
+    res += "unfix fxnve\n"
+    res += "unfix fxlange\n"
 
     return res

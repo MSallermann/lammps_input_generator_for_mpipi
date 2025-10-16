@@ -7,17 +7,22 @@ from jinja2 import Environment, FileSystemLoader
 
 
 def render_jinja2(
-    working_directory: Path,
-    template_file: Path,
-    included_files: Iterable[Path],
+    working_directory: Path | str,
+    template_file: Path | str,
+    included_files: Iterable[Path | str],
     variables: dict,
-    output: Path,
+    output: Path | str,
 ):
+    working_directory = Path(working_directory)
+    template_file = Path(template_file)
+    output = Path(output)
+
     # First we create the working directory
     working_directory.mkdir(exist_ok=True, parents=True)
 
     # then we copy the template file and all included files over
-    for file in [template_file, *included_files]:
+    for _file in [template_file, *included_files]:
+        file = Path(_file)
         if file != working_directory / file.name:
             shutil.copy(file, working_directory)
 
