@@ -375,17 +375,18 @@ def write_lammps_data_file(lammps_data: LammpsData) -> str:
     for row in lammps_data.atoms:
         res += f"{row.atom_id} {row.molecule_tag} {row.atom_type} {row.q} {row.x} {row.y} {row.z}\n"
 
-    res += "\n"
-    res += "Bonds\n"
-    res += "\n"
+    if len(lammps_data.bonds) > 0:
+        res += "\n"
+        res += "Bonds\n"
+        res += "\n"
 
-    for row in lammps_data.bonds:
-        res += f"{row.bond_id} {row.bond_type} {row.atom_1} {row.atom_2}\n"
+        for row in lammps_data.bonds:
+            res += f"{row.bond_id} {row.bond_type} {row.atom_1} {row.atom_2}\n"
 
     return res
 
 
-def get_lammps_group_script(lammps_data: LammpsData) -> str:
+def get_lammps_group_definition(lammps_data: LammpsData) -> str:
     res = ""
 
     for g in lammps_data.groups:
@@ -393,16 +394,65 @@ def get_lammps_group_script(lammps_data: LammpsData) -> str:
         res += "".join([f" {p[0]}:{p[1]}" for p in g.id_pairs])
         res += "\n"
 
-    res += (
-        "group nonrigid subtract all "
-        + " ".join([g.name for g in lammps_data.groups])
-        + "\n"
-    )
+    if len(lammps_data.groups) > 0:
+        res += (
+            "group nonrigid subtract all "
+            + " ".join([g.name for g in lammps_data.groups])
+            + "\n"
+        )
+    else:
+        res += "group nonrigid union all"
 
+    return res
+
+
+def get_lammps_minimize_command(
+    lammps_data: LammpsData,
+    etol: float,
+    ftol: float,
+    maxiter: int,
+    max_eval: int,
+    timestep: float,
+):
+    res = ""
+
+    # fix
     for num, g in enumerate(lammps_data.groups):
-        res += f"fix fxnverigid{num} {g.name} rigid/nvt molecule temp ${{T}} ${{T}} 1000.0\n"
+        res += f"fix freeze{num} {g.name} setforce 0.0 0.0 0.0\n"
+
+    # run
+    res += "min_style cg\n"
+    res += f"timestep {timestep}\n"
+    res += f"minimize {etol} {ftol} {maxiter} {max_eval}\n"
+
+    # unfix
+    for num, _ in enumerate(lammps_data.groups):
+        res += f"unfix freeze{num}\n"
+
+    return res
+
+
+def get_lammps_nvt_command(
+    lammps_data: LammpsData, timestep: float, temp: float, n_time_steps: int
+) -> str:
+    res = ""
+
+    # fix
+    for num, g in enumerate(lammps_data.groups):
+        res += f"fix fxnverigid{num} {g.name} rigid/nvt molecule temp {temp} {temp} 1000.0\n"
 
     res += "fix fxnve nonrigid nve\n"
-    res += "fix fxlange nonrigid langevin ${T} ${T} 1000.0 32784\n"
+    res += f"fix fxlange nonrigid langevin {temp} ${temp} 1000.0 32784\n"
+
+    # run
+    res += f"timestep {timestep}\n"
+    res += f"run {n_time_steps}\n"
+
+    # unfix
+    for num, _ in enumerate(lammps_data.groups):
+        res += f"unfix fxnverigid{num}\n"
+
+    res += "unfix fxnve nonrigid nve\n"
+    res += f"unfix fxlange nonrigid langevin {temp} {temp} 1000.0 32784\n"
 
     return res

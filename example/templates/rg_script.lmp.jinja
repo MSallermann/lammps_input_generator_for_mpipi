@@ -7,7 +7,7 @@ atom_style  full
 
 bond_style  harmonic
 
-read_data {{files.data}}
+read_data {{params.data_file_name}}
 
 #--------  Input variables  ------#
 variable T equal {{params.temperature}}                # Temperature of the system in K
@@ -915,9 +915,8 @@ neighbor  3.5 multi
 neigh_modify  every 10 delay 0
 
 comm_style    tiled
-timestep      {{params.timestep}}
 
-{% include files.groups %}
+{{params.groups_definition_str}}
 
 ########   COMPUTE RESULTS  #######
 
@@ -934,7 +933,7 @@ compute densidad all chunk/atom bin/1d z lower 1
 fix 3 all ave/chunk 200000 1 200000 densidad density/mass file density.profile
 #######################################
 
-dump        1 all custom 500000 result.lammpstrj id mol type q xu yu zu
+dump          1 all custom 500000 result.lammpstrj id mol type q xu yu zu
 dump_modify   1 sort id
 
 thermo        1000
@@ -943,4 +942,4 @@ thermo_modify flush yes
 
 restart       1000000 restart1.tmp restart2.tmp
 
-run           ${nts}
+{{params.run_str}}
