@@ -401,7 +401,7 @@ def get_lammps_group_definition(lammps_data: LammpsData) -> str:
             + "\n"
         )
         res += (
-            "neigh_modify exclude molecule "
+            "neigh_modify exclude molecule/intra "
             + " ".join([g.name for g in lammps_data.groups])
             + "\n"
         )
