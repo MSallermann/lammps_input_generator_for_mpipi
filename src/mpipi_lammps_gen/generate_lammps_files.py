@@ -400,6 +400,12 @@ def get_lammps_group_definition(lammps_data: LammpsData) -> str:
             + " ".join([g.name for g in lammps_data.groups])
             + "\n"
         )
+        res += (
+            "neigh_modify exclude molecule "
+            + " ".join([g.name for g in lammps_data.groups])
+            + "\n"
+        )
+
     else:
         res += "group nonrigid union all"
 
@@ -433,7 +439,12 @@ def get_lammps_minimize_command(
 
 
 def get_lammps_nvt_command(
-    lammps_data: LammpsData, timestep: float, temp: float, n_time_steps: int
+    lammps_data: LammpsData,
+    timestep: float,
+    temp: float,
+    n_time_steps: int,
+    ramp_up_stages: int = 0,
+    steps_per_stage: int = 10000,
 ) -> str:
     res = ""
 
@@ -443,6 +454,12 @@ def get_lammps_nvt_command(
 
     res += "fix fxnve nonrigid nve\n"
     res += f"fix fxlange nonrigid langevin {temp} {temp} 1000.0 32784\n"
+
+    if ramp_up_stages > 0:
+        dt_ramp_up = np.linspace(0.0, timestep, ramp_up_stages + 2)[1:-1]
+        for dt in dt_ramp_up:
+            res += f"timestep {dt:.3f}\n"
+            res += f"run {steps_per_stage}\n"
 
     # run
     res += f"timestep {timestep}\n"
