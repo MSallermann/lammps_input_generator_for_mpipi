@@ -389,25 +389,25 @@ def write_lammps_data_file(lammps_data: LammpsData) -> str:
 def get_lammps_group_definition(lammps_data: LammpsData) -> str:
     res = ""
 
+    # define the groups for the globular domains
     for g in lammps_data.groups:
         res += f"group {g.name} id "
         res += "".join([f" {p[0]}:{p[1]}" for p in g.id_pairs])
         res += "\n"
 
+    # define the nonrigid group
     if len(lammps_data.groups) > 0:
         res += (
             "group nonrigid subtract all "
             + " ".join([g.name for g in lammps_data.groups])
             + "\n"
         )
-        res += (
-            "neigh_modify exclude molecule/intra "
-            + " ".join([g.name for g in lammps_data.groups])
-            + "\n"
-        )
-
     else:
         res += "group nonrigid union all"
+
+    # neigh modify to exclude intra molecule interaction
+    for g in lammps_data.groups:
+        res += f"neigh_modify exclude molecule/intra {g.name}\n"
 
     return res
 
