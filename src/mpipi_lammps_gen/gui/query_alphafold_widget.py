@@ -44,7 +44,7 @@ class DataFrameColumnSelect(QDialog):
         # Instruction text
         text = QPlainTextEdit()
         text.setReadOnly(True)
-        text.setPlainText("Please select the column with the UniProt IDs.")
+        text.setPlainText("Please select the column with the UniProt Accession.")
         layout.addWidget(text)
 
         # Combo box with column names
@@ -89,7 +89,7 @@ class IDListTextEdit(QPlainTextEdit):
                 self.df = pl.read_parquet(file_path)
             else:
                 msg = QMessageBox(parent=self)
-                msg.setIcon(QMessageBox.Icon.Critical)  # 👈 sets the error icon
+                msg.setIcon(QMessageBox.Icon.Critical)
                 msg.setWindowTitle("Incompatible file ending")
                 msg.setText(f"The file {file_path} has an unsupported suffix.")
                 msg.setInformativeText("Supported suffixes: [.txt, .csv, .parquet]")
@@ -131,7 +131,7 @@ class IDListWidget(QWidget):
         self.uniprot_ids_input = IDListTextEdit()
         self.uniprot_ids_input.setBaseSize(QSize(-1, 50))
         self.uniprot_ids_input.setPlaceholderText(
-            "Enter Uniprot IDs manually (separated by newlines) or drag and drop a file (csv or parquet)"
+            "Enter Uniprot Accessions manually (separated by newlines) or drag and drop a file (csv or parquet)"
         )
         # self.uniprot_ids_input.(self.handle_drop_event)
         self.uniprot_ids_input.textChanged.connect(self.try_to_parse_ids)
@@ -163,39 +163,39 @@ class QueryDisplayWidget(QWidget):
         layout = QFormLayout()
         self.setLayout(layout)
 
-        self.accession = QLineEdit()
-        self.accession.setReadOnly(True)
-        layout.addRow("accession", self.accession)
+        self.accession_line_edit = QLineEdit()
+        self.accession_line_edit.setReadOnly(True)
+        layout.addRow("accession", self.accession_line_edit)
 
-        self.http_status = QLineEdit()
-        self.http_status.setReadOnly(True)
-        layout.addRow("http_status", self.http_status)
+        self.http_status_line_edit = QLineEdit()
+        self.http_status_line_edit.setReadOnly(True)
+        layout.addRow("http_status", self.http_status_line_edit)
 
-        self.n_residues = QLineEdit()
-        self.n_residues.setReadOnly(True)
-        layout.addRow("n_residues", self.n_residues)
+        self.n_residues_line_edit = QLineEdit()
+        self.n_residues_line_edit.setReadOnly(True)
+        layout.addRow("n_residues", self.n_residues_line_edit)
 
-        self.sequence = QLineEdit()
-        self.sequence.setReadOnly(True)
-        layout.addRow("sequence", self.sequence)
+        self.sequence_line_edit = QLineEdit()
+        self.sequence_line_edit.setReadOnly(True)
+        layout.addRow("sequence", self.sequence_line_edit)
 
-        self.plddts = QLineEdit()
-        self.plddts.setReadOnly(True)
-        layout.addRow("plddts", self.plddts)
+        self.plddts_line_edit = QLineEdit()
+        self.plddts_line_edit.setReadOnly(True)
+        layout.addRow("plddts", self.plddts_line_edit)
 
     def update_data(self, query_result: AlphaFoldQueryResult):
-        self.accession.setText(str(query_result.accession))
-        self.http_status.setText(str(query_result.http_status))
+        self.accession_line_edit.setText(str(query_result.accession))
+        self.http_status_line_edit.setText(str(query_result.http_status))
 
         if query_result.sequence is not None:
             n_residues = len(query_result.sequence)
         else:
             n_residues = 0
 
-        self.n_residues.setText(str(n_residues))
+        self.n_residues_line_edit.setText(str(n_residues))
 
-        self.sequence.setText(str(query_result.sequence))
-        self.plddts.setText(str(query_result.plddts))
+        self.sequence_line_edit.setText(str(query_result.sequence))
+        self.plddts_line_edit.setText(str(query_result.plddts))
 
 
 class QueryAlphaFoldWidget(step_widget.StepWidget):
