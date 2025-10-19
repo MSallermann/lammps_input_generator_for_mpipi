@@ -1,11 +1,11 @@
+import enum
 import logging
 import queue
 import threading
-import time
 from pathlib import Path
 
 import polars as pl
-from PySide6.QtCore import QSize
+from PySide6.QtCore import QSize, Signal, Slot
 from PySide6.QtGui import QDropEvent
 from PySide6.QtWidgets import (
     QComboBox,
@@ -13,11 +13,13 @@ from PySide6.QtWidgets import (
     QDialogButtonBox,
     QFormLayout,
     QGridLayout,
+    QHBoxLayout,
     QLabel,
     QLineEdit,
     QListWidget,
     QMessageBox,
     QPlainTextEdit,
+    QProgressBar,
     QPushButton,
     QVBoxLayout,
     QWidget,
@@ -83,19 +85,22 @@ class IDListTextEdit(QPlainTextEdit):
 
             logger.info(f"Opening {file_path}")
 
-            if file_path.suffix.lower() in [".csv", ".txt"]:
-                self.df = pl.read_csv(file_path)
-            elif file_path.suffix.lower() == ".parquet":
-                self.df = pl.read_parquet(file_path)
-            else:
-                msg = QMessageBox(parent=self)
-                msg.setIcon(QMessageBox.Icon.Critical)
-                msg.setWindowTitle("Incompatible file ending")
-                msg.setText(f"The file {file_path} has an unsupported suffix.")
-                msg.setInformativeText("Supported suffixes: [.txt, .csv, .parquet]")
-                msg.setStandardButtons(QMessageBox.StandardButton.Ok)
-                msg.exec()
-                return
+            try:
+                if file_path.suffix.lower() in [".csv", ".txt"]:
+                    self.df = pl.read_csv(file_path)
+                elif file_path.suffix.lower() == ".parquet":
+                    self.df = pl.read_parquet(file_path)
+                else:
+                    msg = QMessageBox(parent=self)
+                    msg.setIcon(QMessageBox.Icon.Critical)
+                    msg.setWindowTitle("Incompatible file ending")
+                    msg.setText(f"The file {file_path} has an unsupported suffix.")
+                    msg.setInformativeText("Supported suffixes: [.txt, .csv, .parquet]")
+                    msg.setStandardButtons(QMessageBox.StandardButton.Ok)
+                    msg.exec()
+                    return
+            except Exception:
+                logger.exception(f"Exception when trying to parse {file_path}")
 
             col_select_dialog = DataFrameColumnSelect(self.df, parent=self)
             if col_select_dialog.exec():
@@ -199,11 +204,20 @@ class QueryDisplayWidget(QWidget):
 
 
 class QueryAlphaFoldWidget(step_widget.StepWidget):
+    result_ready = Signal(object)  # emits AlphaFoldQueryResult
+    step_done = Signal()  # emits after each attempt (success or fail)
+
+    class QueryControlState(enum.Enum):
+        Pause = 0
+        Play = 1
+
     def __init__(self):
         super().__init__(
             title="QueryAlphaFold",
             description="Query the alpha fold DB with a uniprot ID",
         )
+
+        self.query_control_state = self.QueryControlState.Pause
 
         self.query_results: list[AlphaFoldQueryResult] = []
         self.timeout: int = 1
@@ -216,10 +230,16 @@ class QueryAlphaFoldWidget(step_widget.StepWidget):
         self.id_list_widget = IDListWidget()
         layout.addWidget(self.id_list_widget)
 
-        # Button to start the query
+        # Layout with control buttons and progress bar
+        sublayout = QHBoxLayout()
+        layout.addLayout(sublayout)
+
         self.query_button = QPushButton("Run Query")
         self.query_button.pressed.connect(self.on_query_button_pressed)
-        layout.addWidget(self.query_button)
+        sublayout.addWidget(self.query_button)
+
+        self.query_progress_bar = QProgressBar(textVisible=True)
+        sublayout.addWidget(self.query_progress_bar)
 
         # Queried Ids
         self.queried_ids = QListWidget()
@@ -229,28 +249,46 @@ class QueryAlphaFoldWidget(step_widget.StepWidget):
         self.results_widget = QueryDisplayWidget()
         layout.addWidget(self.results_widget)
 
+        self.result_ready.connect(self._on_result_ready)
+        self.step_done.connect(self._on_step_done)
+
         self._query_queue = queue.Queue()
         self._query_thread = threading.Thread(target=self._query_loop, daemon=True)
         self._query_thread.start()
+
+    @Slot(object)
+    def _on_result_ready(self, res: AlphaFoldQueryResult):
+        self.query_results.append(res)
+        # accession might be in res.accession; fall back just in case
+        acc = getattr(res, "accession", None)
+        self.queried_ids.addItem(str(acc) if acc is not None else "(unknown)")
+
+    @Slot()
+    def _on_step_done(self):
+        self.query_progress_bar.setValue(self.query_progress_bar.value() + 1)
+
+    def on_pause_button_pressed(self):
+        self.pause = not self.pause
 
     def _query_loop(self):
         """This function runs in a background thread and continuously queries for ids which get pushed to the queue"""
         while True:
             while not self._query_queue.empty():
-                accession = self._query_queue.get()
+                try:
+                    accession = self._query_queue.get(timeout=0.5)
+                except queue.Empty:
+                    continue
 
                 try:
                     res = query_alphafold(
                         accession, timeout=self.timeout, retries=self.retries
                     )
+                    self.result_ready.emit(res)
                 except Exception as e:
                     logger.exception(e)
                     continue
-
-                self.query_results.append(res)
-                self.queried_ids.addItem(accession)
-
-            time.sleep(0.5)
+                finally:
+                    self.step_done.emit()
 
     def on_query_button_pressed(self):
         logger.info("Running alpha fold query")
@@ -258,6 +296,8 @@ class QueryAlphaFoldWidget(step_widget.StepWidget):
         # Clear results
         self.queried_ids.clear()
         self.query_results.clear()
+        self.query_progress_bar.setRange(0, len(self.id_list_widget.ids))
+        self.query_progress_bar.setValue(0)
 
         # Empty the query queue
         self._query_queue = queue.Queue()
