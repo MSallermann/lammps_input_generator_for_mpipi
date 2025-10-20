@@ -420,7 +420,7 @@ def get_lammps_minimize_command(
     max_eval: int,
     timestep: float,
 ):
-    res = ""
+    res = f"# Minimizing with frozen rigid groups with timestep {timestep}\n"
 
     # fix
     for num, g in enumerate(lammps_data.groups):
@@ -438,29 +438,62 @@ def get_lammps_minimize_command(
     return res
 
 
+def get_lammps_viscous_command(
+    lammps_data: LammpsData,
+    n_time_steps: int,
+    timestep: float,
+    damp: float = 10000.0,
+    limit: float = 0.01,
+):
+    res = "# Minimizing via viscous damping\n"
+
+    # fix
+    for num, g in enumerate(lammps_data.groups):
+        res += f"fix fxnverigid{num} {g.name} rigid/nve molecule\n"
+
+    res += f"fix fxnve nonrigid nve/limit {limit}\n"
+    res += f"fix damp all viscous {damp}\n"
+    res += f"timestep {timestep}\n"
+    res += f"run {n_time_steps}\n"
+
+    for num, _ in enumerate(lammps_data.groups):
+        res += f"unfix fxnverigid{num}\n"
+
+    res += "unfix fxnve\n"
+    res += "unfix damp\n"
+
+    return res
+
+
 def get_lammps_nvt_command(
     lammps_data: LammpsData,
     timestep: float,
     temp: float,
     n_time_steps: int,
-    ramp_up_stages: int = 0,
+    dt_ramp_up: list[float] | None = None,
+    lange_damp: float = 1000.0,
     steps_per_stage: int = 10000,
+    seed: int = 34278,
 ) -> str:
-    res = ""
+    if dt_ramp_up is None:
+        dt_ramp_up = []
+
+    res = "# Running NVT ... \n"
 
     # fix
     for num, g in enumerate(lammps_data.groups):
         res += f"fix fxnverigid{num} {g.name} rigid/nvt molecule temp {temp} {temp} 1000.0\n"
 
     res += "fix fxnve nonrigid nve\n"
-    res += f"fix fxlange nonrigid langevin {temp} {temp} 1000.0 32784\n"
+    res += f"fix fxlange nonrigid langevin {temp} {temp} {lange_damp} {seed}\n"
 
-    if ramp_up_stages > 0:
-        dt_ramp_up = np.linspace(0.0, timestep, ramp_up_stages + 2)[1:-1]
-        for dt in dt_ramp_up:
-            res += f"timestep {dt:.3f}\n"
-            res += f"run {steps_per_stage}\n"
+    for i, dt in enumerate(dt_ramp_up):
+        res += f"# ... ramping up time step from {dt_ramp_up[0]:.3f} to {dt_ramp_up[-1]:.3f}. Stage {i + 1} / {len(dt_ramp_up)}\n"
+        res += f"timestep {dt:.3f}\n"
+        res += f"run {steps_per_stage}\n"
+        res += f"velocity all create {temp} {seed}\n"
 
+    res += f"# ... running with final timestep of {timestep}\n"
     # run
     res += f"timestep {timestep}\n"
     res += f"run {n_time_steps}\n"
