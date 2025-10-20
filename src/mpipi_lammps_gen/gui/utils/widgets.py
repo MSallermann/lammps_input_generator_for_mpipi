@@ -1,7 +1,17 @@
 import enum
 
+import polars as pl
 from PySide6.QtCore import Signal, Slot
-from PySide6.QtWidgets import QPushButton, QStyle
+from PySide6.QtWidgets import (
+    QComboBox,
+    QDialog,
+    QDialogButtonBox,
+    QPlainTextEdit,
+    QPushButton,
+    QStyle,
+    QVBoxLayout,
+    QWidget,
+)
 
 
 class PlayPauseState(enum.Enum):
@@ -40,3 +50,39 @@ class PlayPauseButton(QPushButton):
 
     def _apply_icon(self, playing: bool):
         self.setIcon(self._pause_icon if playing else self._play_icon)
+
+
+class DataFrameColumnSelect(QDialog):
+    def __init__(
+        self, df: pl.DataFrame, msg: str, parent: QWidget | None = None
+    ) -> None:
+        super().__init__(parent=parent)
+        self.df = df
+        self.setWindowTitle("Select column")
+
+        layout = QVBoxLayout(self)
+
+        # Instruction text
+        text = QPlainTextEdit()
+        text.setReadOnly(True)
+        text.setPlainText(msg)
+        layout.addWidget(text)
+
+        # Combo box with column names
+        self.combobox = QComboBox()
+        self.combobox.addItems(self.df.columns)
+        layout.addWidget(self.combobox)
+
+        # OK / Cancel buttons
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+        )
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+
+    def selected_column(self) -> str | None:
+        """Return the selected column name, or None if cancelled."""
+        if self.result() == QDialog.DialogCode.Accepted:
+            return self.combobox.currentText()
+        return None

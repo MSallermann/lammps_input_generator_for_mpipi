@@ -6,9 +6,6 @@ import polars as pl
 from PySide6.QtCore import QSize, Signal, Slot
 from PySide6.QtGui import QDropEvent
 from PySide6.QtWidgets import (
-    QComboBox,
-    QDialog,
-    QDialogButtonBox,
     QFormLayout,
     QGridLayout,
     QHBoxLayout,
@@ -26,46 +23,12 @@ from mpipi_lammps_gen.alpha_fold_query import (
     AlphaFoldQueryResult,
     query_alphafold,
 )
-from mpipi_lammps_gen.gui.utils.widgets import PlayPauseButton
+from mpipi_lammps_gen.gui.utils.widgets import DataFrameColumnSelect, PlayPauseButton
 from mpipi_lammps_gen.gui.utils.worker_thread import PlayPauseThread
 
 from . import step_widget
 
 logger = logging.getLogger(__name__)
-
-
-class DataFrameColumnSelect(QDialog):
-    def __init__(self, df: pl.DataFrame, parent: QWidget | None = None) -> None:
-        super().__init__(parent=parent)
-        self.df = df
-        self.setWindowTitle("Select column")
-
-        layout = QVBoxLayout(self)
-
-        # Instruction text
-        text = QPlainTextEdit()
-        text.setReadOnly(True)
-        text.setPlainText("Please select the column with the UniProt Accession.")
-        layout.addWidget(text)
-
-        # Combo box with column names
-        self.combobox = QComboBox()
-        self.combobox.addItems(self.df.columns)
-        layout.addWidget(self.combobox)
-
-        # OK / Cancel buttons
-        buttons = QDialogButtonBox(
-            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
-        )
-        buttons.accepted.connect(self.accept)
-        buttons.rejected.connect(self.reject)
-        layout.addWidget(buttons)
-
-    def selected_column(self) -> str | None:
-        """Return the selected column name, or None if cancelled."""
-        if self.result() == QDialog.DialogCode.Accepted:
-            return self.combobox.currentText()
-        return None
 
 
 class IDListTextEdit(QPlainTextEdit):
@@ -101,7 +64,11 @@ class IDListTextEdit(QPlainTextEdit):
             except Exception:
                 logger.exception(f"Exception when trying to parse {file_path}")
 
-            col_select_dialog = DataFrameColumnSelect(self.df, parent=self)
+            col_select_dialog = DataFrameColumnSelect(
+                self.df,
+                msg="Please select the column that corresponds to the UniProt accession",
+                parent=self,
+            )
             if col_select_dialog.exec():
                 column = col_select_dialog.selected_column()
                 if column is not None:
