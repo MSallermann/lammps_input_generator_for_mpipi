@@ -1,7 +1,5 @@
-import enum
 import logging
 import queue
-import threading
 from pathlib import Path
 
 import polars as pl
@@ -20,7 +18,6 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QPlainTextEdit,
     QProgressBar,
-    QPushButton,
     QVBoxLayout,
     QWidget,
 )
@@ -29,6 +26,8 @@ from mpipi_lammps_gen.alpha_fold_query import (
     AlphaFoldQueryResult,
     query_alphafold,
 )
+from mpipi_lammps_gen.gui.utils.widgets import PlayPauseButton
+from mpipi_lammps_gen.gui.utils.worker_thread import PlayPauseThread
 
 from . import step_widget
 
@@ -123,7 +122,7 @@ class IDListTextEdit(QPlainTextEdit):
 
 
 class IDListWidget(QWidget):
-    """Widget which ties together the input of"""
+    """Widget to input a list of accessions to be queried"""
 
     def __init__(self):
         super().__init__()
@@ -207,17 +206,11 @@ class QueryAlphaFoldWidget(step_widget.StepWidget):
     result_ready = Signal(object)  # emits AlphaFoldQueryResult
     step_done = Signal()  # emits after each attempt (success or fail)
 
-    class QueryControlState(enum.Enum):
-        Pause = 0
-        Play = 1
-
     def __init__(self):
         super().__init__(
             title="QueryAlphaFold",
             description="Query the alpha fold DB with a uniprot ID",
         )
-
-        self.query_control_state = self.QueryControlState.Pause
 
         self.query_results: list[AlphaFoldQueryResult] = []
         self.timeout: int = 1
@@ -234,8 +227,10 @@ class QueryAlphaFoldWidget(step_widget.StepWidget):
         sublayout = QHBoxLayout()
         layout.addLayout(sublayout)
 
-        self.query_button = QPushButton("Run Query")
-        self.query_button.pressed.connect(self.on_query_button_pressed)
+        self.query_button = PlayPauseButton()
+        self.query_button.play_pressed.connect(self.on_play_button_pressed)
+        self.query_button.pause_pressed.connect(self.on_pause_button_pressed)
+
         sublayout.addWidget(self.query_button)
 
         self.query_progress_bar = QProgressBar(textVisible=True)
@@ -253,7 +248,7 @@ class QueryAlphaFoldWidget(step_widget.StepWidget):
         self.step_done.connect(self._on_step_done)
 
         self._query_queue = queue.Queue()
-        self._query_thread = threading.Thread(target=self._query_loop, daemon=True)
+        self._query_thread = PlayPauseThread(target=self._query_loop, daemon=True)
         self._query_thread.start()
 
     @Slot(object)
@@ -267,43 +262,38 @@ class QueryAlphaFoldWidget(step_widget.StepWidget):
     def _on_step_done(self):
         self.query_progress_bar.setValue(self.query_progress_bar.value() + 1)
 
-    def on_pause_button_pressed(self):
-        self.pause = not self.pause
-
     def _query_loop(self):
         """This function runs in a background thread and continuously queries for ids which get pushed to the queue"""
-        while True:
-            while not self._query_queue.empty():
-                try:
-                    accession = self._query_queue.get(timeout=0.5)
-                except queue.Empty:
-                    continue
+        try:
+            accession = self._query_queue.get(timeout=0.5)
+            try:
+                res = query_alphafold(
+                    accession, timeout=self.timeout, retries=self.retries
+                )
+                self.result_ready.emit(res)
+            except Exception as e:
+                logger.exception(e)
+            finally:
+                self.step_done.emit()
+        except queue.Empty:
+            ...
 
-                try:
-                    res = query_alphafold(
-                        accession, timeout=self.timeout, retries=self.retries
-                    )
-                    self.result_ready.emit(res)
-                except Exception as e:
-                    logger.exception(e)
-                    continue
-                finally:
-                    self.step_done.emit()
+    @Slot()
+    def on_pause_button_pressed(self):
+        logger.info("Pausing query")
+        self._query_thread.pause()
 
-    def on_query_button_pressed(self):
+    @Slot()
+    def on_play_button_pressed(self):
         logger.info("Running alpha fold query")
 
-        # Clear results
-        self.queried_ids.clear()
-        self.query_results.clear()
+        if self._query_queue.empty():
+            self.query_progress_bar.setValue(0)
+            # Fill the query queue
+            [self._query_queue.put(cur_id) for cur_id in self.id_list_widget.ids]
+
+        self._query_thread.resume()
         self.query_progress_bar.setRange(0, len(self.id_list_widget.ids))
-        self.query_progress_bar.setValue(0)
-
-        # Empty the query queue
-        self._query_queue = queue.Queue()
-
-        # Fill the query queue
-        [self._query_queue.put(cur_id) for cur_id in self.id_list_widget.ids]
 
     def update_query_display(self, idx: int):
         self.results_widget.update_data(self.query_results[idx])
