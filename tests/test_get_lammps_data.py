@@ -1,12 +1,12 @@
 from pathlib import Path
 
 from mpipi_lammps_gen.generate_lammps_files import (
-    decide_globular_domains,
     generate_lammps_data,
     get_lammps_group_definition,
     parse_cif_from_path,
     write_lammps_data_file,
 )
+from mpipi_lammps_gen.globular_domains import decide_globular_domains_from_sequence
 
 CIF = Path(__file__).parent / "res" / "Q9ULK0.cif"
 
@@ -24,7 +24,7 @@ def test_get_protein_data():
     minimum_idr_length = 16
     minimum_domain_length = 4
 
-    globular_domains = decide_globular_domains(
+    globular_domains = decide_globular_domains_from_sequence(
         prot_data.plddts,
         threshold=threshold,
         minimum_domain_length=minimum_domain_length,

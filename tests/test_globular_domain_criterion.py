@@ -1,4 +1,4 @@
-from mpipi_lammps_gen.generate_lammps_files import decide_globular_domains
+from mpipi_lammps_gen.globular_domains import decide_globular_domains_from_sequence
 
 
 def test_globular_domain_criterion():
@@ -31,7 +31,7 @@ def test_globular_domain_criterion():
         + GLOB_long  # Should be separate from the others
     )
 
-    domains = decide_globular_domains(
+    domains = decide_globular_domains_from_sequence(
         plddts,
         threshold=threshold,
         minimum_domain_length=minimum_domain_length,
@@ -44,8 +44,6 @@ def test_globular_domain_criterion():
             print(f"IDR: {idx}")
         else:
             print(f"GLO: {idx}")
-
-    print(domains)
 
     # two domains
     assert len(domains) == 2
