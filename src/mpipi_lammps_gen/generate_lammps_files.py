@@ -32,14 +32,24 @@ AminoID = {
 mass = {"H": 1, "C": 12, "O": 16, "N": 14, "P": 31, "S": 32}
 
 
+@dataclass
+class GlobularDomain:
+    indices: list[tuple[int, int]]
+
+    def is_in_rigid_region(self, idx: int) -> bool:
+        return any(idx >= t[0] and idx <= t[1] for t in self.indices)
+
+    def to_lammps_indices(self) -> list[tuple[int, int]]:
+        """Returns the indices with a +1 added, since LAMMPS counts from 1."""
+        return [(t[0] + 1, t[1] + 1) for t in self.indices]
+
+
 def decide_globular_domains(
     plddts: Iterable[float],
     threshold: float = 70.0,
     minimum_domain_length: int = 3,
     minimum_idr_length: int = 3,
-) -> list[tuple[int, int]]:
-    res = []
-
+) -> list[GlobularDomain]:
     in_globular_domain = [p > threshold for p in plddts]
     n_res = len(in_globular_domain)
 
@@ -66,35 +76,44 @@ def decide_globular_domains(
 
     assert len(start_indices) == len(end_indices)
 
-    res = list(zip(start_indices, end_indices, strict=True))
-
-    # remove idrs, which are below the minimum idr length by "merging" domains
-    indices_to_remove = []
-
-    for idx in range(len(res) - 1):
-        pair1 = res[idx]
-        pair2 = res[idx + 1]
-
-        if pair2[0] - pair1[1] - 1 < minimum_idr_length:
-            indices_to_remove.append(idx)
-            # we just set both pairs to the new "merged" value
-            res[idx] = (pair1[0], pair2[1])
-            res[idx + 1] = (pair1[0], pair2[1])
-
-    for i in sorted(indices_to_remove, reverse=True):
-        res.pop(i)
+    globular_domains = [
+        GlobularDomain(indices=[(s, e)])
+        for s, e in zip(start_indices, end_indices, strict=True)
+    ]
 
     # remove domains, which are below the minimum globular domain length
     indices_to_remove = []
-    for idx, pair in enumerate(res):
-        if pair[1] - pair[0] + 1 < minimum_domain_length:
-            indices_to_remove.append(idx)
+
+    for idx, domain in enumerate(globular_domains):
+        for pair in domain.indices:
+            if pair[1] - pair[0] + 1 < minimum_domain_length:
+                indices_to_remove.append(idx)  # noqa: PERF401
+
+    for i in sorted(indices_to_remove, reverse=True):
+        globular_domains.pop(i)
+
+    # remove IDRs, which are below the minimum IDR length by "merging" domains
+    indices_to_remove = []
+
+    for idx in range(len(globular_domains) - 1):
+        domain1 = globular_domains[idx]
+        last_idx1 = domain1.indices[-1][1]
+
+        domain2 = globular_domains[idx + 1]
+        first_idx2 = domain2.indices[0][0]
+
+        if first_idx2 - last_idx1 - 1 < minimum_idr_length:
+            indices_to_remove.append(
+                idx
+            )  # We remove domain 1 and merge it into domain2
+            # we just set both pairs to the new "merged" value
+            globular_domains[idx + 1].indices = list(domain1.indices + domain2.indices)
 
     # iterate in reverse order, because then the lower indices do not change due to the `pop`
     for i in sorted(indices_to_remove, reverse=True):
-        res.pop(i)
+        globular_domains.pop(i)
 
-    return res
+    return globular_domains
 
 
 @dataclass
@@ -211,6 +230,8 @@ def parse_cif_from_path(cif_path: Path) -> ProteinData:
 
 @dataclass
 class LammpsData:
+    """Dataclass, which closely represents a LAMMPS data file. All indices count from 1."""
+
     class AtomRow(NamedTuple):
         atom_id: int
         molecule_tag: int
@@ -246,13 +267,13 @@ class LammpsData:
 
 def generate_lammps_data(
     prot_data: ProteinData,
-    globular_domains: Iterable[tuple[int, int]],
+    globular_domains: Iterable[GlobularDomain],
     box_buffer: float = 20.0,
 ) -> LammpsData:
     n_residues = len(prot_data.sequence_three_letter)
 
-    def check_if_idx_is_in_globular_domain(idx: int) -> bool:
-        return any(glob[0] <= idx and glob[1] >= idx for glob in globular_domains)
+    def check_if_idx_is_rigid(idx: int) -> bool:
+        return any(glob.is_in_rigid_region(idx) for glob in globular_domains)
 
     # mass info
     mass_section = []
@@ -286,16 +307,17 @@ def generate_lammps_data(
     for idx_residue in range(n_residues):
         res_info = prot_data.residue_info(idx_residue)
 
-        is_in_globular_domain = check_if_idx_is_in_globular_domain(idx_residue)
+        is_rigid = check_if_idx_is_rigid(idx_residue)
 
         atom_type = AminoID[res_info.three_letter][0]
 
-        if is_in_globular_domain:
+        if is_rigid:
             atom_type += len(AminoID)
 
         atom_section.append(
             LammpsData.AtomRow(
-                atom_id=idx_residue + 1,
+                atom_id=idx_residue + 1,  # remember to increment indices...
+                # remember to increment indices...
                 molecule_tag=1,
                 atom_type=atom_type,
                 q=0.0,
@@ -311,19 +333,20 @@ def generate_lammps_data(
 
     # Within globular domains, bonds are skipped
     for idx_residue in range(n_residues - 1):
-        first_in_glob = check_if_idx_is_in_globular_domain(idx_residue)
-        second_in_glob = check_if_idx_is_in_globular_domain(idx_residue + 1)
+        first_rigid = check_if_idx_is_rigid(idx_residue)
+        second_rigid = check_if_idx_is_rigid(idx_residue + 1)
 
-        # if both residues are in a globular domain we skip the bond
-        if first_in_glob and second_in_glob:
+        # if both residues are rigid, we skip the bond
+        if first_rigid and second_rigid:
             continue
+
         # in this case we are either in an IDR or we are connecting a globular domain to an IDR
         bond_section.append(
             LammpsData.BondRow(
                 bond_id=bond_id,
                 bond_type=1,
-                atom_1=idx_residue + 1,
-                atom_2=idx_residue + 2,
+                atom_1=idx_residue + 1,  # remember to increment indices...
+                atom_2=idx_residue + 2,  # remember to increment indices...
             )
         )
         bond_id += 1
@@ -331,8 +354,9 @@ def generate_lammps_data(
     # groups
     groups = []
     for idx, domain in enumerate(globular_domains):
-        id_pairs = [(domain[0] + 1, domain[1] + 1)]
-        groups.append(LammpsData.Group(name=f"CD{idx + 1}", id_pairs=id_pairs))
+        groups.append(
+            LammpsData.Group(name=f"CD{idx + 1}", id_pairs=domain.to_lammps_indices())
+        )
 
     return LammpsData(
         atoms=atom_section,
