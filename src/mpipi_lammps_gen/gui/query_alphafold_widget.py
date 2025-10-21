@@ -32,7 +32,7 @@ logger = logging.getLogger(__name__)
 
 
 class IDListTextEdit(QPlainTextEdit):
-    """The widget to enter the IDs, which are to be queried"""
+    """This is the TextEdit in which uniprot accessions are entered either via drag&drop or manual input."""
 
     def __init__(self):
         super().__init__()
@@ -89,7 +89,7 @@ class IDListTextEdit(QPlainTextEdit):
 
 
 class IDListWidget(QWidget):
-    """Widget to input a list of accessions to be queried"""
+    """This widget ties together the TextEdit to input accessios as well as a small stats display."""
 
     def __init__(self):
         super().__init__()
@@ -122,11 +122,11 @@ class IDListWidget(QWidget):
 
         self.ids = {line.strip() for line in lines}
 
-        self.number_of_ids.setText(f"No. IDs: {len(self.ids)}")
+        self.number_of_ids.setText(f"No. unique IDs: {len(self.ids)}")
 
 
 class QueryDisplayWidget(QWidget):
-    """Display the results of a single query"""
+    """This widget displays the results of the query for a single accession"""
 
     def __init__(self):
         super().__init__()
