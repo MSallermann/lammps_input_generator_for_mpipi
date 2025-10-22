@@ -7,6 +7,10 @@ from mpipi_lammps_gen.generate_lammps_files import (
     write_lammps_data_file,
 )
 from mpipi_lammps_gen.globular_domains import decide_globular_domains_from_sequence
+from mpipi_lammps_gen.util import (
+    coordination_numbers_from_distance_matrix,
+    group_distance_matrix,
+)
 
 CIF = Path(__file__).parent / "res" / "Q9ULK0.cif"
 
@@ -45,3 +49,21 @@ def test_get_protein_data():
     # hard to assert anything about these, but they should at least not crash
     write_lammps_data_file(lammps_data)
     get_lammps_group_definition(lammps_data)
+
+    # now we test some random util stuff
+    residue_positions = prot_data.get_residue_positions()
+    for ig1 in range(len(globular_domains)):
+        for ig2 in range(ig1 + 1, len(globular_domains)):
+            g1 = globular_domains[ig1]
+            g2 = globular_domains[ig2]
+
+            distance_matrix = group_distance_matrix(residue_positions, g1, g2)
+
+            assert distance_matrix.shape == (g1.size_total(), g2.size_total())
+
+            coord_a, coord_b = coordination_numbers_from_distance_matrix(
+                distance_matrix, cutoff=6
+            )
+
+            assert g1.size_total() == coord_a.shape[0]
+            assert g2.size_total() == coord_b.shape[0]

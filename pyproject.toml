@@ -2,7 +2,7 @@
 name = "mpipi_lammps_gen"
 version = "0.1.0"
 
-dependencies = ["numpy"]
+dependencies = ["numpy", "scipy", "jinja2"]
 
 requires-python = ">= 3.10"
 authors = [

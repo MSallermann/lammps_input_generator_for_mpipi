@@ -6,6 +6,15 @@ from dataclasses import dataclass
 class GlobularDomain:
     indices: list[tuple[int, int]]
 
+    def start_idx(self) -> int:
+        return self.indices[0][0]
+
+    def end_idx(self) -> int:
+        return self.indices[-1][1]
+
+    def size_total(self) -> int:
+        return self.end_idx() - self.start_idx()
+
     def is_in_rigid_region(self, idx: int) -> bool:
         return any(idx >= t[0] and idx <= t[1] for t in self.indices)
 
