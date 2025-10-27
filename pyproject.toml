@@ -17,7 +17,7 @@ license-files = ["LICEN[CS]E*"]
 mpipi-builder = "mpipi_lammps_gen.gui.main:main"
 
 [project.optional-dependencies]
-gui = ["pyside6"]
+gui = ["pyside6", "polars", "rich", "requests"]
 
 [tool.pyright]
 include = ["src/mpipi_lammps_gen"]
