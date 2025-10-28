@@ -1,6 +1,7 @@
 import functools
 import logging
 from dataclasses import dataclass
+from typing import Any
 
 from mpipi_lammps_gen.alpha_fold_query import get_with_retries
 
@@ -31,6 +32,8 @@ class SASBDBQueryResult:
 
     project_title: str
     doi: str | None
+
+    sasbdb_data: dict[str, Any] | None
 
 
 def query_sasbdb(
@@ -108,6 +111,7 @@ def query_sasbdb(
                 rg_guinier_err=rg_guinier_err,
                 rg_pddf=rg_pddf,
                 rg_pddf_err=rg_pddf_err,
+                sasbdb_data=sasbdb_entry,
             )
         )
 
