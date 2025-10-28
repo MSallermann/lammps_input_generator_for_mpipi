@@ -41,14 +41,19 @@ def query_sasbdb(
     timeout: int = 10,
     retries: int = 2,
     backoff_time: int = 5,
-) -> list[SASBDBQueryResult | None]:
+) -> list[SASBDBQueryResult] | None:
     url = SASBDB_UNIPROT_URL.format(accession=accession)
 
     get = functools.partial(
         get_with_retries, retries=retries, timeout=timeout, backoff_time=backoff_time
     )
 
-    r = get(url)
+    try:
+        r = get(url)
+    except Exception:
+        msg = f"Could not query {url}"
+        logger.exception(msg)
+        return None
 
     query_results = []
 

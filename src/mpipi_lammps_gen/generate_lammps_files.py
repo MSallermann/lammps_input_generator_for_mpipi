@@ -146,6 +146,16 @@ def parse_cif_from_path(cif_path: Path) -> ProteinData:
         return parse_cif(cif_text)
 
 
+def trim_protein(prot: ProteinData, start: int, end: int) -> ProteinData:
+    return ProteinData(
+        atom_xyz=prot.atom_xyz[start:end],
+        atom_types=prot.atom_types[start:end],
+        plddts=prot.plddts[start:end],
+        sequence_one_letter=prot.sequence_one_letter[start:end],
+        sequence_three_letter=prot.sequence_three_letter[start:end],
+    )
+
+
 @dataclass
 class LammpsData:
     """Dataclass, which closely represents a LAMMPS data file. All indices count from 1."""

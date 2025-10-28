@@ -1,3 +1,4 @@
+import functools
 import logging
 import time
 from collections.abc import Generator, Iterable
@@ -58,14 +59,17 @@ def parse_plddt_from_cif(cif_text: str) -> list[float]:
 
 
 class AlphaFoldQueryResult(NamedTuple):
-    http_status: int
     accession: str
+    alpha_fold_db_id: str
+    is_uniprot: bool
+    uniprot_start: int
+    uniprot_end: int
     sequence: str | None
     cif_text: str | None
     pdb_text: str | None
     plddts: list[float] | None
     pae_matrix: list[list[float]] | None
-    alpha_fold_data: dict[str, Any] | None
+    alpha_fold_data: dict[str, Any]
 
 
 def query_url_from_alphafold_data(
@@ -90,7 +94,7 @@ def query_url_from_alphafold_data(
     return None
 
 
-def query_alphafold(  # noqa: PLR0912, PLR0915
+def query_alphafold(
     accession: str,
     timeout: int = 10,
     retries: int = 2,
@@ -98,109 +102,104 @@ def query_alphafold(  # noqa: PLR0912, PLR0915
     get_pdb: bool = True,
     get_pae_matrix: bool = True,
     backoff_time: int = 5,
-) -> AlphaFoldQueryResult:
+) -> list[AlphaFoldQueryResult] | None:
     """For a single accession, query the alpha fold database and retrieve some information."""
 
     url = ALPHAFOLD_PREDICTION_URL.format(accession=accession)
 
-    # These are the return values
-    response_code_alpha_fold: int = -1
-    sequence: str | None = None
-    plddts: list[float] | None = None
-    alpha_fold_data: dict[str, Any] | None = None
-    cif_text: str | None = None
-    pdb_text: str | None = None
-    pae_matrix: list[list[float]] | None = None
+    get = functools.partial(
+        get_with_retries, retries=retries, timeout=timeout, backoff_time=backoff_time
+    )
 
     try:
-        r = get_with_retries(
-            url, retries=retries, backoff_time=backoff_time, timeout=timeout
-        )
-
-        response_code_alpha_fold = r.status_code
-
-        if response_code_alpha_fold != 200:
-            logger.warning(f"Received response code {response_code_alpha_fold}")
-        else:
-            try:
-                alpha_fold_data = r.json()[0]
-            except Exception:
-                logger.exception("Could not convert response to a single json.")
-
-            if alpha_fold_data is None:
-                logger.warning("Received `None` for alpha_fold_data")
-            else:
-                sequence = alpha_fold_data.get("sequence")
-
-                if sequence is None:
-                    logger.warning(
-                        f"Could not get `sequence` key from alpha fold data. Available keys: {alpha_fold_data.keys()}"
-                    )
-                else:
-                    if get_cif:
-                        res = query_url_from_alphafold_data(
-                            "cifUrl",
-                            alpha_fold_data,
-                            retries=retries,
-                            backoff_time=backoff_time,
-                            timeout=timeout,
-                        )
-                        cif_text = res.text if res is not None else None
-
-                        if cif_text is not None:
-                            plddts = parse_plddt_from_cif(cif_text)
-                            if len(sequence) != len(plddts):
-                                msg = "sequence and plddts do not have the same length"
-                                raise Exception(msg)
-
-                    if get_pdb:
-                        res = query_url_from_alphafold_data(
-                            "pdbUrl",
-                            alpha_fold_data,
-                            retries=retries,
-                            backoff_time=backoff_time,
-                            timeout=timeout,
-                        )
-                        pdb_text = res.text if res is not None else None
-
-                    if get_pae_matrix:
-                        res = query_url_from_alphafold_data(
-                            "paeDocUrl",
-                            alpha_fold_data,
-                            retries=retries,
-                            backoff_time=backoff_time,
-                            timeout=timeout,
-                        )
-
-                        try:
-                            pae_dict = res.json()[0] if res is not None else None
-                            if pae_dict is not None:
-                                pae_matrix = pae_dict.get("predicted_aligned_error")
-                                assert pae_matrix is not None
-                                assert len(pae_matrix) == len(sequence)
-                                assert len(pae_matrix) == len(sequence)
-                        except Exception:
-                            logger.exception("Exception when trying to parse PAE")
+        r = get(url)
     except Exception:
-        logger.exception("Exception in `query_alphafold`")
-    finally:
-        ...
+        msg = f"Could not query {url}"
+        logger.exception(msg)
+        return None
 
-    return AlphaFoldQueryResult(
-        http_status=response_code_alpha_fold,
-        accession=accession,
-        sequence=sequence,
-        plddts=plddts,
-        pdb_text=pdb_text,
-        cif_text=cif_text,
-        pae_matrix=pae_matrix,
-        alpha_fold_data=alpha_fold_data,
-    )
+    query_results = []
+
+    for alpha_fold_data in r.json():
+        sequence = alpha_fold_data.get("sequence")
+
+        plddts = None
+        pdb_text = None
+        cif_text = None
+        pae_matrix = None
+
+        if sequence is None:
+            logger.warning(
+                f"Could not get `sequence` key from alpha fold data. Available keys: {alpha_fold_data.keys()}"
+            )
+        else:
+            if get_cif:
+                res = query_url_from_alphafold_data(
+                    "cifUrl",
+                    alpha_fold_data,
+                    retries=retries,
+                    backoff_time=backoff_time,
+                    timeout=timeout,
+                )
+                cif_text = res.text if res is not None else None
+
+                if cif_text is not None:
+                    plddts = parse_plddt_from_cif(cif_text)
+                    if len(sequence) != len(plddts):
+                        msg = "sequence and plddts do not have the same length"
+                        raise Exception(msg)
+
+            if get_pdb:
+                res = query_url_from_alphafold_data(
+                    "pdbUrl",
+                    alpha_fold_data,
+                    retries=retries,
+                    backoff_time=backoff_time,
+                    timeout=timeout,
+                )
+                pdb_text = res.text if res is not None else None
+
+            if get_pae_matrix:
+                res = query_url_from_alphafold_data(
+                    "paeDocUrl",
+                    alpha_fold_data,
+                    retries=retries,
+                    backoff_time=backoff_time,
+                    timeout=timeout,
+                )
+
+                try:
+                    pae_dict = res.json()[0] if res is not None else None
+                    if pae_dict is not None:
+                        pae_matrix = pae_dict.get("predicted_aligned_error")
+                        assert pae_matrix is not None
+                        assert len(pae_matrix) == len(sequence)
+                        assert len(pae_matrix) == len(sequence)
+                except Exception:
+                    logger.exception("Exception when trying to parse PAE")
+
+            query_results.append(
+                AlphaFoldQueryResult(
+                    accession=accession,
+                    alpha_fold_db_id=alpha_fold_data["modelEntityId"],
+                    is_uniprot=alpha_fold_data["isUniProt"],
+                    uniprot_start=alpha_fold_data["uniprotStart"],
+                    uniprot_end=alpha_fold_data["uniprotEnd"],
+                    sequence=sequence,
+                    plddts=plddts,
+                    pdb_text=pdb_text,
+                    cif_text=cif_text,
+                    pae_matrix=pae_matrix,
+                    alpha_fold_data=alpha_fold_data,
+                )
+            )
+
+    return query_results
 
 
 def query_alphafold_bulk(
     accession_list: Iterable[str], **kwargs
-) -> Generator[AlphaFoldQueryResult]:
+) -> Generator[list[AlphaFoldQueryResult] | None]:
     """For a sequence of accessions, return a generator to query the alpha fold database."""
 
     for a in accession_list:
@@ -208,32 +207,8 @@ def query_alphafold_bulk(
 
 
 if __name__ == "__main__":
-    import numpy as np
-
     accession = "A0A096LP49"
 
     res = query_alphafold(accession, get_pae_matrix=True, get_pdb=False, get_cif=False)
 
-    print(np.array(res.pae_matrix))
-    print(np.array(res.pae_matrix).shape)
-
-    # print(res.sequence)
-    # print(res.plddts)
-
-    # with Path("ex.cif").open("w") as f:
-    #     if res.cif_text is not None:
-    #         f.write(res.cif_text)
-
-    # print(res.cif_text)
-    # print(res.alpha_fold_data)
-    # print(res.http_status)
-
-    # id_list = [
-    #     "A0A024RBG1",
-    #     "A0A075B6T7",
-    #     "A0A087WTH1",
-    #     "A0A087WTH5",
-    # ]
-
-    # res = query_alphafold_bulk(id_list, get_cif=False)
-    # print([r.sequence for r in res])
+    print(res)
