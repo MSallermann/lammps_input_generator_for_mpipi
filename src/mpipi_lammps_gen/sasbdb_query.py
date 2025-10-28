@@ -57,11 +57,17 @@ def query_sasbdb(
 
     query_results = []
 
+    if r is None:
+        return None
+
     for entry in r.json():
         sasbdb_id = entry["code"]
         url = SASBDB_QUERY_URL.format(sasbdb_id=sasbdb_id)
 
         response = get(url)
+        if response is None:
+            continue
+
         if response.status_code != 200:
             continue
 

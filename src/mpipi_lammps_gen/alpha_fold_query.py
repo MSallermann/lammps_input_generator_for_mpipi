@@ -15,15 +15,20 @@ ALPHAFOLD_PREDICTION_URL = "https://alphafold.ebi.ac.uk/api/prediction/{accessio
 
 def get_with_retries(
     url: str, retries: int, backoff_time: int, timeout: int, **kwargs
-) -> requests.Response:
-    for _ in range(retries):
-        r = requests.get(url, timeout=timeout, **kwargs)
+) -> requests.Response | None:
+    for _ in range(retries + 1):
+        try:
+            r = requests.get(url, timeout=timeout, **kwargs)
+        except Exception:
+            logger.warning("Exception in `get`")
+            time.sleep(backoff_time)
+            continue
         if r.status_code != 200:
             time.sleep(backoff_time)
             continue
         return r
 
-    return requests.get(url, timeout=timeout, **kwargs)
+    return None
 
 
 def parse_plddt_from_cif(cif_text: str) -> list[float]:
@@ -84,9 +89,9 @@ def query_url_from_alphafold_data(
     else:
         response = get_with_retries(url, *args, **kwargs)
 
-        if response.status_code != 200:
+        if response is None or response.status_code != 200:
             logger.warning(
-                f"Received response code {response.status_code} for request of cif file"
+                f"Did not receive response for `{key}` key from alpha fold data."
             )
         else:
             return response
@@ -116,6 +121,9 @@ def query_alphafold(
     except Exception:
         msg = f"Could not query {url}"
         logger.exception(msg)
+        return None
+
+    if r is None:
         return None
 
     query_results = []
