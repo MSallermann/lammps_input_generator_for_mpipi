@@ -1,4 +1,8 @@
-from mpipi_lammps_gen.globular_domains import decide_globular_domains_from_sequence
+from mpipi_lammps_gen.globular_domains import (
+    GlobularDomain,
+    decide_globular_domains_from_sequence,
+    merge_domains,
+)
 
 
 def test_globular_domain_criterion():
@@ -54,3 +58,26 @@ def test_globular_domain_criterion():
     assert domains[0].is_in_rigid_region(20)
 
     assert not domains[0].is_in_rigid_region(37)
+
+
+def test_merge_domains():
+    domains = [
+        GlobularDomain([(0, 1)]),
+        GlobularDomain([(2, 3)]),
+        GlobularDomain([(4, 5)]),
+        GlobularDomain([(6, 7)]),
+        GlobularDomain([(8, 9)]),
+    ]
+
+    def should_be_merged(g1: GlobularDomain, g2: GlobularDomain):
+        return (g1.start_idx() == 0 and g2.start_idx() <= 4) or (
+            g1.start_idx() == 6 and g2.start_idx() == 8
+        )
+
+    new_domains = merge_domains(domains, should_be_merged)
+
+    print(new_domains)
+
+    assert len(new_domains) == 2
+    assert new_domains[0].start_idx() == 0
+    assert new_domains[0].end_idx() == 5
