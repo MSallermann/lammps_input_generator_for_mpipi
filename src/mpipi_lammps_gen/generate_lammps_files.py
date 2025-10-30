@@ -40,7 +40,7 @@ class ResidueInfo:
     xyz: list[tuple[float, float, float]]
     position: tuple[float, float, float]
     atom_types: list[str]
-    plddt: float
+    plddt: float | None
     one_letter: str
     three_letter: str
 
@@ -50,9 +50,11 @@ class ProteinData:
     atom_xyz: list[list[tuple[float, float, float]]]
     atom_types: list[list[str]]
 
-    plddts: list[float]
     sequence_one_letter: list[str]
     sequence_three_letter: list[str]
+
+    plddts: list[float] | None
+    pae: list[list[float]] | None = None
 
     def compute_residue_position(
         self, types: list[str], xyz: list[tuple[float, float, float]]
@@ -68,7 +70,7 @@ class ProteinData:
             ),
             xyz=self.atom_xyz[idx],
             atom_types=self.atom_types[idx],
-            plddt=self.plddts[idx],
+            plddt=None if self.plddts is None else self.plddts[idx],  # type: ignore
             one_letter=self.sequence_one_letter[idx],
             three_letter=self.sequence_three_letter[idx],
         )
@@ -80,6 +82,19 @@ class ProteinData:
             residue_positions.append(self.compute_residue_position(types, xyz_list))
 
         return residue_positions
+
+
+def trim_protein(prot: ProteinData, start: int, end: int) -> ProteinData:
+    pae = None if prot.pae is None else [row[start:end] for row in prot.pae[start:end]]
+
+    return ProteinData(
+        atom_xyz=prot.atom_xyz[start:end],
+        atom_types=prot.atom_types[start:end],
+        pae=pae,
+        plddts=None if prot.plddts is None else prot.plddts[start:end],
+        sequence_one_letter=prot.sequence_one_letter[start:end],
+        sequence_three_letter=prot.sequence_three_letter[start:end],
+    )
 
 
 def parse_cif(cif_text: str) -> ProteinData:
@@ -144,16 +159,6 @@ def parse_cif_from_path(cif_path: Path) -> ProteinData:
     with cif_path.open() as f:
         cif_text = f.read()
         return parse_cif(cif_text)
-
-
-def trim_protein(prot: ProteinData, start: int, end: int) -> ProteinData:
-    return ProteinData(
-        atom_xyz=prot.atom_xyz[start:end],
-        atom_types=prot.atom_types[start:end],
-        plddts=prot.plddts[start:end],
-        sequence_one_letter=prot.sequence_one_letter[start:end],
-        sequence_three_letter=prot.sequence_three_letter[start:end],
-    )
 
 
 @dataclass
