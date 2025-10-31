@@ -56,7 +56,7 @@ class ProteinData:
     sequence_three_letter: list[str] | None
 
     plddts: list[float] | None
-    pae: list[list[float]] | None = None
+    pae: list[list[float]] | None
 
     def compute_residue_position(
         self, types: list[str], xyz: list[tuple[float, float, float]]
