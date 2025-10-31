@@ -37,21 +37,23 @@ mass = {"H": 1, "C": 12, "O": 16, "N": 14, "P": 31, "S": 32}
 @dataclass
 class ResidueInfo:
     idx: int
-    xyz: list[tuple[float, float, float]]
     position: tuple[float, float, float]
-    atom_types: list[str]
-    plddt: float | None
     one_letter: str
-    three_letter: str
+    three_letter: str | None
+    xyz: list[tuple[float, float, float]] | None
+    atom_types: list[str] | None
+    plddt: float | None
 
 
 @dataclass
 class ProteinData:
-    atom_xyz: list[list[tuple[float, float, float]]]
-    atom_types: list[list[str]]
+    atom_xyz: list[list[tuple[float, float, float]]] | None
+    atom_types: list[list[str]] | None
+
+    residue_positions: list[tuple[float, float, float]] | None
 
     sequence_one_letter: list[str]
-    sequence_three_letter: list[str]
+    sequence_three_letter: list[str] | None
 
     plddts: list[float] | None
     pae: list[list[float]] | None = None
@@ -62,38 +64,74 @@ class ProteinData:
         idx_ca = types.index("CA")
         return xyz[idx_ca]
 
-    def residue_info(self, idx: int):
-        return ResidueInfo(
-            idx=idx,
-            position=self.compute_residue_position(
+    def compute_residue_positions(self) -> list[tuple[float, float, float]] | None:
+        if self.atom_types is not None and self.atom_xyz is not None:
+            self.residue_positions = [
+                self.compute_residue_position(types, xyz_list)
+                for types, xyz_list in zip(self.atom_types, self.atom_xyz, strict=True)
+            ]
+        return self.residue_positions
+
+    def residue_info(self, idx: int) -> ResidueInfo | None:
+        pos: tuple[float, float, float]
+
+        # Get the position, either from residue positions or by computing it
+        if self.residue_positions is not None:
+            pos = self.residue_positions[idx]
+        elif self.atom_xyz is not None and self.atom_types is not None:
+            pos = self.compute_residue_position(
                 self.atom_types[idx], self.atom_xyz[idx]
-            ),
-            xyz=self.atom_xyz[idx],
-            atom_types=self.atom_types[idx],
-            plddt=None if self.plddts is None else self.plddts[idx],  # type: ignore
-            one_letter=self.sequence_one_letter[idx],
-            three_letter=self.sequence_three_letter[idx],
+            )
+        else:
+            return None
+
+        xyz = None if self.atom_xyz is None else self.atom_xyz[idx]
+        atom_types = None if self.atom_types is None else self.atom_types[idx]
+        three_letter = (
+            None
+            if self.sequence_three_letter is None
+            else self.sequence_three_letter[idx]
         )
 
-    def get_residue_positions(self) -> list[tuple[float, float, float]]:
-        residue_positions = []
+        return ResidueInfo(
+            idx=idx,
+            position=pos,
+            xyz=xyz,
+            atom_types=atom_types,
+            plddt=None if self.plddts is None else self.plddts[idx],  # type: ignore
+            one_letter=self.sequence_one_letter[idx],
+            three_letter=three_letter,
+        )
 
-        for xyz_list, types in zip(self.atom_xyz, self.atom_types, strict=False):
-            residue_positions.append(self.compute_residue_position(types, xyz_list))
+    def get_residue_positions(self) -> list[tuple[float, float, float]] | None:
+        if self.residue_positions is not None:
+            return self.residue_positions
 
-        return residue_positions
+        if (
+            self.residue_positions is None
+            and self.atom_xyz is not None
+            and self.atom_types is not None
+        ):
+            return self.compute_residue_positions()
+
+        return None
 
 
 def trim_protein(prot: ProteinData, start: int, end: int) -> ProteinData:
     pae = None if prot.pae is None else [row[start:end] for row in prot.pae[start:end]]
 
     return ProteinData(
-        atom_xyz=prot.atom_xyz[start:end],
-        atom_types=prot.atom_types[start:end],
+        atom_xyz=None if prot.atom_xyz is None else prot.atom_xyz[start:end],
+        atom_types=None if prot.atom_types is None else prot.atom_types[start:end],
+        residue_positions=None
+        if prot.residue_positions is None
+        else prot.residue_positions[start:end],
         pae=pae,
         plddts=None if prot.plddts is None else prot.plddts[start:end],
         sequence_one_letter=prot.sequence_one_letter[start:end],
-        sequence_three_letter=prot.sequence_three_letter[start:end],
+        sequence_three_letter=None
+        if prot.sequence_three_letter is None
+        else prot.sequence_three_letter[start:end],
     )
 
 
@@ -146,13 +184,16 @@ def parse_cif(cif_text: str) -> ProteinData:
             msg = "Parsed a plddt which is not between 1 and 100"
             raise Exception(msg)
 
-    return ProteinData(
+    res = ProteinData(
         atom_xyz=atom_xyz,
         atom_types=atom_types,
+        residue_positions=None,
         plddts=plddt_list,
         sequence_one_letter=sequence_one_letter_list,
         sequence_three_letter=sequence_three_letter_list,
     )
+    res.compute_residue_positions()
+    return res
 
 
 def parse_cif_from_path(cif_path: Path) -> ProteinData:
@@ -203,6 +244,8 @@ def generate_lammps_data(
     globular_domains: Iterable[GlobularDomain],
     box_buffer: float = 20.0,
 ) -> LammpsData:
+    assert prot_data.sequence_three_letter is not None
+
     n_residues = len(prot_data.sequence_three_letter)
 
     def check_if_idx_is_rigid(idx: int) -> bool:
@@ -221,6 +264,7 @@ def generate_lammps_data(
 
     # box limits
     residue_positions = prot_data.get_residue_positions()
+    assert residue_positions is not None
 
     x_coords = [r[0] for r in residue_positions]
     y_coords = [r[1] for r in residue_positions]
@@ -239,6 +283,10 @@ def generate_lammps_data(
     atom_section = []
     for idx_residue in range(n_residues):
         res_info = prot_data.residue_info(idx_residue)
+
+        # asserts for static type checker
+        assert res_info is not None
+        assert res_info.three_letter is not None
 
         is_rigid = check_if_idx_is_rigid(idx_residue)
 
