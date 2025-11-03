@@ -120,6 +120,14 @@ class ProteinData:
 def trim_protein(prot: ProteinData, start: int, end: int) -> ProteinData:
     pae = None if prot.pae is None else [row[start:end] for row in prot.pae[start:end]]
 
+    n_residues = len(prot.sequence_one_letter)
+
+    assert start >= 0
+    assert start < n_residues
+    assert end >= 0
+    assert start < n_residues
+    assert start < end
+
     return ProteinData(
         atom_xyz=None if prot.atom_xyz is None else prot.atom_xyz[start:end],
         atom_types=None if prot.atom_types is None else prot.atom_types[start:end],
@@ -188,6 +196,7 @@ def parse_cif(cif_text: str) -> ProteinData:
         atom_xyz=atom_xyz,
         atom_types=atom_types,
         residue_positions=None,
+        pae=None,
         plddts=plddt_list,
         sequence_one_letter=sequence_one_letter_list,
         sequence_three_letter=sequence_three_letter_list,

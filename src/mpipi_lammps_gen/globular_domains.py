@@ -67,10 +67,10 @@ def decide_globular_domains_from_sequence(
     ]
 
     # Special checks for the first and last index, since we cannot detect them based on changes from False to True
-    if in_globular_domain[0]:
+    if len(in_globular_domain) > 0 and in_globular_domain[0]:
         start_indices.insert(0, 0)
 
-    if in_globular_domain[-1]:
+    if len(in_globular_domain) > 0 and in_globular_domain[-1]:
         end_indices.append(n_res - 1)
 
     assert len(start_indices) == len(end_indices)
