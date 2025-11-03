@@ -36,7 +36,7 @@ class GlobularDomain:
 
     @staticmethod
     def merge(g1: GlobularDomain, g2: GlobularDomain) -> GlobularDomain:
-        # Make sure thet the indices keep monotoncially increasing
+        # Make sure thet the indices keep monotonically increasing
         if g1.end_idx() < g2.start_idx():
             return GlobularDomain(indices=g1.indices + g2.indices)
 
