@@ -31,6 +31,52 @@ AminoID = {
     "ILE": [20, 6.18, 113.2],
 }
 
+__three_to_one__ = {
+    "GLY": "G",
+    "ALA": "A",
+    "VAL": "V",
+    "LEU": "L",
+    "ILE": "I",
+    "THR": "T",
+    "SER": "S",
+    "MET": "M",
+    "CYS": "C",
+    "PRO": "P",
+    "PHE": "F",
+    "TYR": "Y",
+    "TRP": "W",
+    "HIS": "H",
+    "LYS": "K",
+    "ARG": "R",
+    "ASP": "D",
+    "GLU": "E",
+    "ASN": "N",
+    "GLN": "Q",
+}
+
+__one_to_three__ = {
+    "G": "GLY",
+    "A": "ALA",
+    "V": "VAL",
+    "L": "LEU",
+    "I": "ILE",
+    "T": "THR",
+    "S": "SER",
+    "M": "MET",
+    "C": "CYS",
+    "P": "PRO",
+    "F": "PHE",
+    "Y": "TYR",
+    "W": "TRP",
+    "H": "HIS",
+    "K": "LYS",
+    "R": "ARG",
+    "D": "ASP",
+    "E": "GLU",
+    "N": "ASN",
+    "Q": "GLN",
+}
+
 mass = {"H": 1, "C": 12, "O": 16, "N": 14, "P": 31, "S": 32}
 
 
@@ -131,15 +177,19 @@ def trim_protein(prot: ProteinData, start: int, end: int) -> ProteinData:
     return ProteinData(
         atom_xyz=None if prot.atom_xyz is None else prot.atom_xyz[start:end],
         atom_types=None if prot.atom_types is None else prot.atom_types[start:end],
-        residue_positions=None
-        if prot.residue_positions is None
-        else prot.residue_positions[start:end],
+        residue_positions=(
+            None
+            if prot.residue_positions is None
+            else prot.residue_positions[start:end]
+        ),
         pae=pae,
         plddts=None if prot.plddts is None else prot.plddts[start:end],
         sequence_one_letter=prot.sequence_one_letter[start:end],
-        sequence_three_letter=None
-        if prot.sequence_three_letter is None
-        else prot.sequence_three_letter[start:end],
+        sequence_three_letter=(
+            None
+            if prot.sequence_three_letter is None
+            else prot.sequence_three_letter[start:end]
+        ),
     )
 
 
@@ -253,7 +303,10 @@ def generate_lammps_data(
     globular_domains: Iterable[GlobularDomain],
     box_buffer: float = 20.0,
 ) -> LammpsData:
-    assert prot_data.sequence_three_letter is not None
+    if prot_data.sequence_three_letter is None:
+        prot_data.sequence_three_letter = [
+            __one_to_three__[r] for r in prot_data.sequence_one_letter
+        ]
 
     n_residues = len(prot_data.sequence_three_letter)
 
