@@ -12,6 +12,7 @@ def render_jinja2(
     included_files: Iterable[Path | str],
     variables: dict,
     output: Path | str,
+    delete_workdir: bool = True,
 ):
     working_directory = Path(working_directory)
     template_file = Path(template_file)
@@ -32,6 +33,9 @@ def render_jinja2(
 
     with output.open("w") as f:
         f.write(template.render(**variables))
+
+    if delete_workdir:
+        shutil.rmtree(working_directory)
 
 
 if __name__ == "__main__":
