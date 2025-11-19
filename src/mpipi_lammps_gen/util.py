@@ -1,10 +1,15 @@
+import math
 from collections.abc import Sequence
 
 import numpy as np
 import numpy.typing as npt
 from scipy.spatial import distance
 
-from mpipi_lammps_gen.generate_lammps_files import GlobularDomain
+from mpipi_lammps_gen.generate_lammps_files import (
+    GlobularDomain,
+    ProteinData,
+    is_valid_one_letter_sequence,
+)
 
 
 def group_distance_matrix(
@@ -32,3 +37,33 @@ def coordination_numbers_from_distance_matrix(
     coord_numbers_b = np.sum(within_cutooff, axis=0)
 
     return (coord_numbers_a, coord_numbers_b)
+
+
+def sequence_to_prot_data_spiral(
+    seq: str,
+    n_res_per_ring: int = 16,
+    radius_spiral: float = 10.0,
+    distance_z: float = 10.0,
+) -> ProteinData:
+    assert is_valid_one_letter_sequence(seq)
+
+    res_positions = [
+        (
+            radius_spiral * math.sin(idx_res / n_res_per_ring * 2.0 * math.pi),
+            radius_spiral * math.cos(idx_res / n_res_per_ring * 2.0 * math.pi),
+            distance_z / n_res_per_ring * idx_res,
+        )
+        for idx_res in range(len(seq))
+    ]
+
+    plddts = [0.0] * len(seq)
+
+    return ProteinData(
+        atom_xyz=None,
+        atom_types=None,
+        residue_positions=res_positions,
+        sequence_one_letter=list(seq),
+        sequence_three_letter=None,
+        pae=None,
+        plddts=plddts,
+    )

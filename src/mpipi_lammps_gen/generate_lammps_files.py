@@ -77,6 +77,15 @@ __one_to_three__ = {
     "Q": "GLN",
 }
 
+
+def is_valid_one_letter_sequence(seq: str | Iterable[str]):
+    return all(res in __one_to_three__ for res in seq)
+
+
+def is_valid_three_letter_sequence(seq: Iterable[str]):
+    return all(res in __three_to_one__ for res in seq)
+
+
 mass = {"H": 1, "C": 12, "O": 16, "N": 14, "P": 31, "S": 32}
 
 
