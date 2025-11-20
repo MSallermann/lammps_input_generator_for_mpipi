@@ -17,8 +17,16 @@ CIF = Path(__file__).parent / "res" / "Q9ULK0.cif"
 
 def test_get_protein_data():
     prot_data = parse_cif_from_path(CIF)
+    prot_data_com = parse_cif_from_path(CIF, method="com")
+
+    print(prot_data.residue_positions[:5])
+    print(prot_data_com.residue_positions[:5])
+
+    assert len(prot_data_com.residue_positions) == len(prot_data.residue_positions)
+    assert prot_data.residue_positions != prot_data_com.residue_positions
 
     n_res = 580
+
     assert len(prot_data.plddts) == n_res
     assert len(prot_data.sequence_one_letter) == n_res
     assert len(prot_data.sequence_three_letter) == n_res

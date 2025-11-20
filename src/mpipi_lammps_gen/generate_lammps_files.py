@@ -1,7 +1,7 @@
 from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import NamedTuple
+from typing import Literal, NamedTuple
 
 import numpy as np
 
@@ -114,15 +114,37 @@ class ProteinData:
     pae: list[list[float]] | None
 
     def compute_residue_position(
-        self, types: list[str], xyz: list[tuple[float, float, float]]
+        self,
+        types: list[str],
+        xyz: list[tuple[float, float, float]],
+        method: Literal["Ca", "com"] = "Ca",
     ) -> tuple[float, float, float]:
-        idx_ca = types.index("CA")
-        return xyz[idx_ca]
+        if method == "Ca":
+            idx_ca = types.index("CA")
+            return xyz[idx_ca]
+        elif method == "com":  # noqa: RET505
+            com_position = np.zeros(3)
+            total_mass = 0.0
 
-    def compute_residue_positions(self) -> list[tuple[float, float, float]] | None:
+            for pos, t in zip(xyz, types, strict=True):
+                m = mass[t[0]]  # We have to look at the first char
+                total_mass += m
+                com_position += m * np.array(pos)
+            return (
+                float(com_position[0] / total_mass),
+                float(com_position[1] / total_mass),
+                float(com_position[2] / total_mass),
+            )
+
+        msg = "Invalid method"
+        raise Exception(msg)
+
+    def compute_residue_positions(
+        self, method: Literal["Ca", "com"] = "Ca"
+    ) -> list[tuple[float, float, float]] | None:
         if self.atom_types is not None and self.atom_xyz is not None:
             self.residue_positions = [
-                self.compute_residue_position(types, xyz_list)
+                self.compute_residue_position(types, xyz_list, method)
                 for types, xyz_list in zip(self.atom_types, self.atom_xyz, strict=True)
             ]
         return self.residue_positions
@@ -202,7 +224,7 @@ def trim_protein(prot: ProteinData, start: int, end: int) -> ProteinData:
     )
 
 
-def parse_cif(cif_text: str) -> ProteinData:
+def parse_cif(cif_text: str, method: Literal["Ca", "com"]) -> ProteinData:
     plddt_list = []
 
     atom_xyz = []
@@ -260,14 +282,16 @@ def parse_cif(cif_text: str) -> ProteinData:
         sequence_one_letter=sequence_one_letter_list,
         sequence_three_letter=sequence_three_letter_list,
     )
-    res.compute_residue_positions()
+    res.compute_residue_positions(method=method)
     return res
 
 
-def parse_cif_from_path(cif_path: Path) -> ProteinData:
+def parse_cif_from_path(
+    cif_path: Path, method: Literal["Ca", "com"] = "Ca"
+) -> ProteinData:
     with cif_path.open() as f:
         cif_text = f.read()
-        return parse_cif(cif_text)
+        return parse_cif(cif_text, method=method)
 
 
 @dataclass
