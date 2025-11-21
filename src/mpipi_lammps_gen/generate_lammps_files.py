@@ -136,11 +136,14 @@ class ProteinData:
                 float(com_position[2] / total_mass),
             )
 
-        msg = "Invalid method"
+        msg = f"Invalid method: {method}"
         raise Exception(msg)
 
     def compute_residue_positions(
-        self, method: Literal["Ca", "com"] | Iterable[Literal["Ca", "com"]] = "Ca"
+        self,
+        method: Literal["Ca", "com"]
+        | Iterable[Literal["Ca", "com"]]
+        | Iterable[str] = "Ca",
     ) -> list[tuple[float, float, float]] | None:
         if self.atom_types is not None and self.atom_xyz is not None:
             if isinstance(method, str):
