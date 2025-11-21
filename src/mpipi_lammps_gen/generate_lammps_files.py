@@ -140,12 +140,18 @@ class ProteinData:
         raise Exception(msg)
 
     def compute_residue_positions(
-        self, method: Literal["Ca", "com"] = "Ca"
+        self, method: Literal["Ca", "com"] | Iterable[Literal["Ca", "com"]] = "Ca"
     ) -> list[tuple[float, float, float]] | None:
         if self.atom_types is not None and self.atom_xyz is not None:
+            if isinstance(method, str):
+                # TODO(MS): e suppress pyright here. Fix it maybe.
+                method = len(self.atom_types) * [method]  # pyright: ignore[reportAssignmentType]
+
             self.residue_positions = [
-                self.compute_residue_position(types, xyz_list, method)
-                for types, xyz_list in zip(self.atom_types, self.atom_xyz, strict=True)
+                self.compute_residue_position(types, xyz_list, meth)  # pyright: ignore[reportArgumentType]
+                for types, xyz_list, meth in zip(
+                    self.atom_types, self.atom_xyz, method, strict=True
+                )
             ]
         return self.residue_positions
 
@@ -224,7 +230,9 @@ def trim_protein(prot: ProteinData, start: int, end: int) -> ProteinData:
     )
 
 
-def parse_cif(cif_text: str, method: Literal["Ca", "com"]) -> ProteinData:
+def parse_cif(
+    cif_text: str, method: Literal["Ca", "com"] | Iterable[Literal["Ca", "com"]]
+) -> ProteinData:
     plddt_list = []
 
     atom_xyz = []

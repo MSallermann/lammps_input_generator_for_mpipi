@@ -52,4 +52,5 @@ ignore = [
     'N818',    # pep8 naming of exceptions (ussing <Nmae>Error)
     'PD901',   # I like df
     'FIX002',
+    'TD003'
 ]
