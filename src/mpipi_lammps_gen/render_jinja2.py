@@ -1,9 +1,20 @@
 import shutil
+import time
 from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
 
 from jinja2 import Environment, FileSystemLoader
+
+
+def _wait_for_files(files: Iterable[Path], timeout: float, poll_interval: float):
+    started = time.time()
+    while not all(f.exists() for f in files):
+        time_cur = time.time()
+        if time_cur - started > timeout:
+            msg = "Timed out while waiting for files."
+            raise Exception(msg)
+        time.sleep(poll_interval)
 
 
 def render_jinja2(
@@ -13,7 +24,10 @@ def render_jinja2(
     variables: dict,
     output: Path | str,
     delete_workdir: bool = True,
+    latency_wait: float = 5.0,
+    latency_poll_interval: float = 0.05,
 ):
+    included_files = [Path(f) for f in included_files]
     working_directory = Path(working_directory)
     template_file = Path(template_file)
     output = Path(output)
@@ -26,6 +40,14 @@ def render_jinja2(
         file = Path(_file)
         if file != working_directory / file.name:
             shutil.copy(file, working_directory)
+
+    # In case we are on a system where there might be a certain
+    # latency in the file system we wait for a small while for all the files to be present
+    _wait_for_files(
+        [template_file, *included_files],
+        timeout=latency_wait,
+        poll_interval=latency_poll_interval,
+    )
 
     env = Environment(loader=FileSystemLoader(str(working_directory)), autoescape=True)
 
