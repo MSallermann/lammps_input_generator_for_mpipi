@@ -208,11 +208,16 @@ def trim_protein(prot: ProteinData, start: int, end: int) -> ProteinData:
 
     n_residues = len(prot.sequence_one_letter)
 
-    assert start >= 0
-    assert start < n_residues
-    assert end >= 0
-    assert start < n_residues
-    assert start < end
+    ### check the start/end/the number of residues
+    good = start >= 0
+    good = good and start < n_residues
+    good = good and end >= 0
+    good = good and start < n_residues
+    good = good and start < end
+
+    if not good:
+        msg = f"There is a problem with the start/end indices or the number of residues: {start = }, {end = }, {n_residues = }"
+        raise Exception(msg)
 
     return ProteinData(
         atom_xyz=None if prot.atom_xyz is None else prot.atom_xyz[start:end],
@@ -459,10 +464,13 @@ def generate_lammps_data(
 def write_lammps_data_file(lammps_data: LammpsData) -> str:
     res = "Lammps data file\n\n"
 
+    n_atom_types = max(int(a.atom_type) for a in lammps_data.atoms)
+
     res += f"{len(lammps_data.atoms)} atoms\n"
-    res += f"{2 * len(AminoID)} atom types\n"
+    res += f"{n_atom_types} atom types\n"
     res += f"{len(lammps_data.bonds)} bonds\n"
     res += f"{1} bond types\n"
+
     res += "0 angles\n"
     res += "0 angle types\n"
     res += "0 dihedrals\n"
@@ -474,17 +482,18 @@ def write_lammps_data_file(lammps_data: LammpsData) -> str:
     res += f"{lammps_data.z_lims[0]} {lammps_data.z_lims[1]} zlo zhi\n"
     res += "\n"
 
-    res += "Masses\n\n"
+    if len(lammps_data.masses) > 0:
+        res += "Masses\n\n"
+        for row in lammps_data.masses:
+            res += f"{row.atom_type:.0f} {row.mass_value}\n"
 
-    for row in lammps_data.masses:
-        res += f"{row.atom_type} {row.mass_value}\n"
+    if len(lammps_data.atoms) > 0:
+        res += "\n"
+        res += "Atoms\n"
+        res += "\n"
 
-    res += "\n"
-    res += "Atoms\n"
-    res += "\n"
-
-    for row in lammps_data.atoms:
-        res += f"{row.atom_id} {row.molecule_tag} {row.atom_type} {row.q} {row.x} {row.y} {row.z}\n"
+        for row in lammps_data.atoms:
+            res += f"{row.atom_id:.0f} {row.molecule_tag:.0f} {row.atom_type:.0f} {row.q} {row.x} {row.y} {row.z}\n"
 
     if len(lammps_data.bonds) > 0:
         res += "\n"
@@ -492,7 +501,7 @@ def write_lammps_data_file(lammps_data: LammpsData) -> str:
         res += "\n"
 
         for row in lammps_data.bonds:
-            res += f"{row.bond_id} {row.bond_type} {row.atom_1} {row.atom_2}\n"
+            res += f"{row.bond_id:.0f} {row.bond_type:.0f} {row.atom_1:.0f} {row.atom_2:.0f}\n"
 
     return res
 
