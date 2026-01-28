@@ -464,7 +464,7 @@ def generate_lammps_data(
 def write_lammps_data_file(lammps_data: LammpsData) -> str:
     res = "Lammps data file\n\n"
 
-    n_atom_types = max(int(a.atom_type) for a in lammps_data.atoms)
+    n_atom_types = 40  # max(int(a.atom_type) for a in lammps_data.atoms)
 
     res += f"{len(lammps_data.atoms)} atoms\n"
     res += f"{n_atom_types} atom types\n"
