@@ -1,81 +1,169 @@
+import asyncio
 import logging
 from collections.abc import Iterable
 from pathlib import Path
+from typing import Any
 
 import polars as pl
 
-from mpipi_lammps_gen import alpha_fold_query
+from mpipi_lammps_gen.alpha_fold_query import query_alphafold_async
 
 logger = logging.getLogger(__name__)
 
 
-def main(uniprot_ids_in: Iterable[str], output_path: Path):
-    uniprot_ids_in = list(uniprot_ids_in)
+def find_next_free_file(file: Path, n_max: int = 1000) -> Path:
+    test_name = Path()
+
+    for i in range(1, n_max + 1):
+        test_name = file.with_name(file.with_suffix("").name + f"_{i}").with_suffix(
+            file.suffix
+        )
+        if not test_name.exists():
+            return test_name
+
+    msg = (
+        f"Could not find free file within {n_max} attempts. Last attempt `{test_name}`"
+    )
+    raise Exception(msg)
+
+
+def save(query_results: list[Any], output_path: Path) -> None:
+    if not query_results:
+        return
+
+    df_out_new = pl.DataFrame(query_results)
+    if len(df_out_new) == 0:
+        return
 
     if output_path.exists():
-        df_out = pl.read_parquet(output_path)
-        seen = set(df_out["accession"])
+        logger.info("`%s` exists. Trying to read as parquet.", output_path)
+        try:
+            df_out_old = pl.read_ipc(output_path)
+            logger.info("... success! There are %d rows in the df", len(df_out_old))
+        except Exception:
+            df_out_old = None
+            logger.exception("... failed!", stack_info=True)
     else:
-        df_out = None
-        seen = set()
+        df_out_old = None
 
-    # Remove all the ids we have seen already
-    uniprot_ids_in_unique = set(uniprot_ids_in)
-    ids_to_query = uniprot_ids_in_unique.difference(seen)
-
-    logger.info(
-        f"Of {len(uniprot_ids_in)} input ids, {len(uniprot_ids_in_unique)} are unique. Out of these {len(seen)} are already in the output file '{output_path}'."
-    )
-    logger.info(f"Therefore I will query {len(ids_to_query)} ids.")
-
-    query_result_generator = alpha_fold_query.query_alphafold_bulk(
-        list(ids_to_query), retries=1, backoff_time=1
-    )
-
-    query_results = []
-
-    idx = 0
-    try:
-        for query_result in query_result_generator:
-            idx += 1
-
-            logger.info(
-                f"Queried {query_result.accession} [{idx} / {len(ids_to_query)}]"
+    if df_out_old is None:
+        df_out = df_out_new
+    else:
+        logger.info("Trying to concat dataframes.")
+        try:
+            df_out = pl.concat((df_out_old, df_out_new), how="vertical_relaxed")
+            logger.info("... success!")
+        except Exception:
+            df_out = df_out_new
+            output_path = find_next_free_file(output_path)
+            logger.exception(
+                "Cannot concatenate data frames. Changing output path to not overwrite data"
             )
 
-            if query_result.http_status != 200:
-                continue
+    logger.info("Saving %d rows to `%s`", len(df_out), output_path)
+    df_out.write_ipc(output_path)
 
-            query_results.append(query_result)
 
-    except BaseException as e:
-        output_path = output_path.with_name("saved_after_exc").with_suffix(".parquet")
+async def main_async(
+    accessions: Iterable[str],
+    output_path: Path,
+    *,
+    n_flush: int = 100,
+    max_concurrency: int = 20,
+    timeout: float = 10.0,
+    retries: int = 1,
+    backoff_time: float = 1.0,
+    # pass-through toggles to query_alphafold_async if you want
+    get_cif: bool = True,
+    get_pdb: bool = True,
+    get_pae_matrix: bool = True,
+) -> None:
+    """
+    Async driver around query_alphafold_async.
 
-        logger.exception(
-            f"Encountered exception {e}. Will try to save data to {output_path}",
-            stack_info=True,
-            stacklevel=1,
-        )
+    - Runs accession queries concurrently (bounded by max_concurrency)
+    - Each accession can yield multiple AF models; we write ONE ROW PER MODEL
+    - Flushes accumulated rows to parquet every n_flush completed accessions
+    """
+    accessions_list = list(accessions)
+    total = len(accessions_list)
 
-        raise e
-    finally:
-        df_out_new = pl.DataFrame(query_results)
-        df_out = df_out_new if df_out is None else pl.concat((df_out, df_out_new))
+    query_results: list[Any] = []
+    completed = 0
 
-        logger.info(f"Saving to {output_path}")
-        df_out.write_parquet(output_path)
+    sem = asyncio.Semaphore(max_concurrency)
+
+    async def one(acc: str) -> list[dict[str, Any]]:
+        nonlocal completed
+        async with sem:
+            models = await query_alphafold_async(
+                acc,
+                timeout=timeout,
+                retries=retries,
+                backoff_time=backoff_time,
+                get_cif=get_cif,
+                get_pdb=get_pdb,
+                get_pae_matrix=get_pae_matrix,
+            )
+
+        completed += 1
+        logger.info("Queried %s [%d / %d]", acc, completed, total)
+
+        # One row per AF model (NamedTuple -> dict)
+        if not models:
+            return []
+        return [m._asdict() for m in models]
+
+    tasks = [asyncio.create_task(one(a)) for a in accessions_list]
+
+    for fut in asyncio.as_completed(tasks):
+        try:
+            rows = await fut
+        except Exception:
+            logger.exception("Query task failed")
+            rows = []
+
+        if rows:
+            query_results.extend(rows)
+
+        if completed != 0 and completed % n_flush == 0:
+            save(query_results=query_results, output_path=output_path)
+            query_results = []
+
+    save(query_results=query_results, output_path=output_path)
+
+
+def main(accessions: Iterable[str], output_path: Path, n_flush: int = 100) -> None:
+    asyncio.run(
+        main_async(accessions=accessions, output_path=output_path, n_flush=n_flush)
+    )
 
 
 if __name__ == "__main__":
+    from logging import FileHandler
+
     from rich.logging import RichHandler
 
     FORMAT = "%(message)s"
     logging.basicConfig(
-        level=logging.INFO, format=FORMAT, datefmt="[%X]", handlers=[RichHandler()]
+        level=logging.INFO,
+        format=FORMAT,
+        datefmt="[%X]",
+        handlers=[RichHandler(), FileHandler("query_alphafold.log")],
     )
 
-    ids_to_query = pl.read_parquet("./data_idrs.parquet").sample(8000)["uniprot_id"]
+    # optional: quiet down noisy httpx request logs if enabled elsewhere
+    logging.getLogger("httpx").setLevel(logging.WARNING)
 
-    output_path = Path("./query_results.parquet")
+    # ids_to_query = pl.read_parquet("./data_idrs.parquet").sample(8000)["uniprot_id"]
 
-    main(uniprot_ids_in=ids_to_query, output_path=output_path)
+    ids_to_query = pl.read_parquet(
+        "/home/sie/Biocondensates/exp_data/1_post_process/peptone.parquet"
+    )["uniprot_accession"]
+    output_path = Path("./af_db_peptone.arrow")
+
+    main(
+        accessions=ids_to_query,
+        output_path=output_path,
+        n_flush=5000,
+    )
