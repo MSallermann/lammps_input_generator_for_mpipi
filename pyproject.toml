@@ -9,8 +9,12 @@ authors = [
     { name = "Moritz Sallermann", email = "mos19@hi.is" },
     { name = "Amrita Goswami", email = "amrita@hi.is" },
 ]
-
 license-files = ["LICEN[CS]E*"]
+
+
+[project.scripts]
+df_to_fasta = "mpipi_lammps_gen.scripts.data_frame_to_fasta:main"
+
 
 [tool.pyright]
 include = ["src/mpipi_lammps_gen"]

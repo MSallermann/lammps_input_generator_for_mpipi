@@ -1,8 +1,10 @@
 import math
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
+from pathlib import Path
 
 import numpy as np
 import numpy.typing as npt
+import polars as pl
 from scipy.spatial import distance
 
 from mpipi_lammps_gen.generate_lammps_files import (
@@ -67,3 +69,28 @@ def sequence_to_prot_data_spiral(
         pae=None,
         plddts=plddts,
     )
+
+
+def read_polars(inp: Path | str) -> pl.DataFrame:
+    inp = Path(inp)
+    if inp.suffix.lower() == ".parquet":
+        return pl.read_parquet(inp)
+    if inp.suffix.lower() in [".feather", ".arrow"]:
+        return pl.read_ipc(inp)
+    if inp.suffix.lower() == ".csv":
+        return pl.read_csv(inp)
+    msg = f"Dont know suffix {inp.suffix}"
+    raise Exception(msg)
+
+
+def to_fasta(sequences: Iterable[str], names: Iterable[str] | None = None) -> str:
+    sequence_list = list(sequences)
+
+    if names is None:
+        names = [f"sequence{i}" for i in range(len(sequence_list))]
+
+    res = ""
+    for seq, name in zip(sequence_list, names, strict=True):
+        res += f">{name}\n{seq.upper()}\n"
+
+    return res
