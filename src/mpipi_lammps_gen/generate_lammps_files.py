@@ -634,7 +634,6 @@ def get_lammps_nvt_command(
 
     res = "# Running NVT ... \n"
 
-    # fix
     for num, g in enumerate(lammps_data.groups):
         res += f"fix fxnverigid{num} {g.name} rigid/nvt molecule temp {temp} {temp} 1000.0\n"
 
@@ -657,6 +656,53 @@ def get_lammps_nvt_command(
         res += f"unfix fxnverigid{num}\n"
 
     res += "unfix fxnve\n"
+    res += "unfix fxlange\n"
+
+    return res
+
+
+def get_lammps_npt_command(
+    lammps_data: LammpsData,
+    timestep: float,
+    temp: float,
+    press: float,
+    n_time_steps: int,
+    dt_ramp_up: list[float] | None = None,
+    steps_per_stage: int = 10000,
+    pdamp: float = 1000.0,
+    lange_damp: float = 1000.0,
+    seed: int = 34278,
+) -> str:
+    if dt_ramp_up is None:
+        dt_ramp_up = []
+
+    res = "# Running NPT ... \n"
+
+    for num, g in enumerate(lammps_data.groups):
+        res += f"fix fxnverigid{num} {g.name} rigid/nvt molecule temp {temp} {temp} 1000.0\n"
+
+    # barostat only
+    res += f"fix fxbaro nonrigid nph iso {press} {press} {pdamp} dilate all\n"
+
+    # langevin thermostat
+    res += f"fix fxlange nonrigid langevin {temp} {temp} {lange_damp} {seed}\n"
+
+    for i, dt in enumerate(dt_ramp_up):
+        res += f"# ... ramping up time step from {dt_ramp_up[0]:.3f} to {dt_ramp_up[-1]:.3f}. Stage {i + 1} / {len(dt_ramp_up)}\n"
+        res += f"timestep {dt:.3f}\n"
+        res += f"run {steps_per_stage}\n"
+        res += f"velocity all create {temp} {seed}\n"
+
+    res += f"# ... running with final timestep of {timestep}\n"
+    # run
+    res += f"timestep {timestep}\n"
+    res += f"run {n_time_steps}\n"
+
+    # unfix
+    for num, _ in enumerate(lammps_data.groups):
+        res += f"unfix fxnverigid{num}\n"
+
+    res += "unfix fxbaro\n"
     res += "unfix fxlange\n"
 
     return res
