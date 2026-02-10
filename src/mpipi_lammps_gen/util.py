@@ -1,3 +1,4 @@
+import json
 import math
 from collections.abc import Iterable, Sequence
 from pathlib import Path
@@ -94,3 +95,25 @@ def to_fasta(sequences: Iterable[str], names: Iterable[str] | None = None) -> st
         res += f">{name}\n{seq.upper()}\n"
 
     return res
+
+
+def to_af_server_json(
+    sequences: Iterable[str], names: Iterable[str] | None = None
+) -> str:
+    sequence_list = list(sequences)
+
+    if names is None:
+        names = [f"sequence{i}" for i in range(len(sequence_list))]
+
+    jobs = []
+    for seq, name in zip(sequence_list, names, strict=True):
+        job_dict = {
+            "name": name.replace("+", "p").replace("-", "m"),
+            "modelSeeds": [],
+            "sequences": [{"proteinChain": {"sequence": seq.upper(), "count": 1}}],
+            "dialect": "alphafoldserver",
+            "version": 1,
+        }
+        jobs.append(job_dict)
+
+    return json.dumps(jobs)

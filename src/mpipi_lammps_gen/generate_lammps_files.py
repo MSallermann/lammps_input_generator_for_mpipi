@@ -6,6 +6,7 @@ from typing import Literal, NamedTuple
 import numpy as np
 
 from mpipi_lammps_gen.globular_domains import GlobularDomain
+from mpipi_lammps_gen.place_proteins import place_proteins_in_grid
 
 # type, sigma, mass
 AminoID = {
@@ -351,6 +352,10 @@ def generate_lammps_data(
     prot_data: ProteinData,
     globular_domains: Iterable[GlobularDomain],
     box_buffer: float = 20.0,
+    n_proteins_x: int = 1,
+    n_proteins_y: int = 1,
+    n_proteins_z: int = 1,
+    grid_buffer: float = 6.0,
 ) -> LammpsData:
     if prot_data.sequence_three_letter is None:
         prot_data.sequence_three_letter = [
@@ -377,9 +382,19 @@ def generate_lammps_data(
     residue_positions = prot_data.get_residue_positions()
     assert residue_positions is not None
 
-    x_coords = [r[0] for r in residue_positions]
-    y_coords = [r[1] for r in residue_positions]
-    z_coords = [r[2] for r in residue_positions]
+    n_proteins_total = n_proteins_x * n_proteins_y * n_proteins_z
+
+    protein_positions = place_proteins_in_grid(
+        residue_positions=residue_positions,
+        n_proteins_x=n_proteins_x,
+        n_proteins_y=n_proteins_y,
+        n_proteins_z=n_proteins_z,
+        grid_buffer=grid_buffer,
+    )
+
+    x_coords = [r[0] for r in protein_positions]
+    y_coords = [r[1] for r in protein_positions]
+    z_coords = [r[2] for r in protein_positions]
 
     x_lo = np.min(x_coords) - box_buffer
     x_hi = np.max(x_coords) + box_buffer
@@ -392,63 +407,81 @@ def generate_lammps_data(
 
     # Fill in the atom section
     atom_section = []
-    for idx_residue in range(n_residues):
-        res_info = prot_data.residue_info(idx_residue)
+    for idx_protein in range(n_proteins_total):
+        for idx_residue in range(n_residues):
+            res_info = prot_data.residue_info(idx_residue)
 
-        # asserts for static type checker
-        assert res_info is not None
-        assert res_info.three_letter is not None
+            # asserts for static type checker
+            assert res_info is not None
+            assert res_info.three_letter is not None
 
-        is_rigid = check_if_idx_is_rigid(idx_residue)
+            is_rigid = check_if_idx_is_rigid(idx_residue)
 
-        atom_type = AminoID[res_info.three_letter][0]
+            atom_type = AminoID[res_info.three_letter][0]
 
-        if is_rigid:
-            atom_type += len(AminoID)
+            if is_rigid:
+                atom_type += len(AminoID)
 
-        atom_section.append(
-            LammpsData.AtomRow(
-                atom_id=idx_residue + 1,  # remember to increment indices...
-                # remember to increment indices...
-                molecule_tag=1,
-                atom_type=atom_type,
-                q=0.0,
-                x=res_info.position[0],
-                y=res_info.position[1],
-                z=res_info.position[2],
+            # atom_id has to be unique for every atom
+            atom_id = (idx_residue + 1) + n_residues * idx_protein
+
+            atom_section.append(
+                LammpsData.AtomRow(
+                    atom_id=atom_id,  # remember to increment indices...
+                    # remember to increment indices...
+                    molecule_tag=idx_protein + 1,
+                    atom_type=atom_type,
+                    q=0.0,
+                    x=protein_positions[idx_protein][idx_residue][0],
+                    y=protein_positions[idx_protein][idx_residue][1],
+                    z=protein_positions[idx_protein][idx_residue][2],
+                )
             )
-        )
 
     # Compute bond info
     bond_section = []
     bond_id = 1
 
     # Within globular domains, bonds are skipped
-    for idx_residue in range(n_residues - 1):
-        first_rigid = check_if_idx_is_rigid(idx_residue)
-        second_rigid = check_if_idx_is_rigid(idx_residue + 1)
+    for idx_protein in range(n_proteins_total):
+        for idx_residue in range(n_residues - 1):
+            first_rigid = check_if_idx_is_rigid(idx_residue)
+            second_rigid = check_if_idx_is_rigid(idx_residue + 1)
 
-        # if both residues are rigid, we skip the bond
-        if first_rigid and second_rigid:
-            continue
+            # if both residues are rigid, we skip the bond
+            if first_rigid and second_rigid:
+                continue
 
-        # in this case we are either in an IDR or we are connecting a globular domain to an IDR
-        bond_section.append(
-            LammpsData.BondRow(
-                bond_id=bond_id,
-                bond_type=1,
-                atom_1=idx_residue + 1,  # remember to increment indices...
-                atom_2=idx_residue + 2,  # remember to increment indices...
+            atom_id_1 = (idx_residue + 1) + n_residues * idx_protein
+            atom_id_2 = (idx_residue + 2) + n_residues * idx_protein
+
+            # in this case we are either in an IDR or we are connecting a globular domain to an IDR
+            bond_section.append(
+                LammpsData.BondRow(
+                    bond_id=bond_id,
+                    bond_type=1,
+                    atom_1=atom_id_1,  # remember to increment indices...
+                    atom_2=atom_id_2,  # remember to increment indices...
+                )
             )
-        )
-        bond_id += 1
+            bond_id += 1
 
     # groups
     groups = []
-    for idx, domain in enumerate(globular_domains):
-        groups.append(
-            LammpsData.Group(name=f"CD{idx + 1}", id_pairs=domain.to_lammps_indices())
-        )
+    for idx_domain, domain in enumerate(globular_domains):
+        # We first get the indices for the "first" protein
+        id_pairs = domain.to_lammps_indices()
+
+        # Then for each protein, we have to add to the groups while offsetting by the number of residues
+        for idx_protein in range(n_proteins_total):
+            id_pairs.extend(
+                [
+                    (i + idx_protein * n_residues, j + idx_protein * n_residues)
+                    for i, j in id_pairs
+                ]
+            )
+
+        groups.append(LammpsData.Group(name=f"CD{idx_domain + 1}", id_pairs=id_pairs))
 
     return LammpsData(
         atoms=atom_section,

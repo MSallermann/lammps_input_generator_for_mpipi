@@ -36,6 +36,12 @@ def test_get_protein_data():
     minimum_idr_length = 16
     minimum_domain_length = 4
 
+    n_proteins_x = 2
+    n_proteins_y = 4
+    n_proteins_z = 4
+
+    n_proteins = n_proteins_x * n_proteins_y * n_proteins_z
+
     globular_domains = decide_globular_domains_from_sequence(
         prot_data.plddts,
         threshold=threshold,
@@ -48,15 +54,24 @@ def test_get_protein_data():
     assert len(globular_domains) == 6
 
     lammps_data = generate_lammps_data(
-        prot_data=prot_data, globular_domains=globular_domains, box_buffer=20.0
+        prot_data=prot_data,
+        globular_domains=globular_domains,
+        box_buffer=20.0,
+        n_proteins_x=n_proteins_x,
+        n_proteins_y=n_proteins_y,
+        n_proteins_z=n_proteins_z,
     )
 
-    assert len(lammps_data.atoms) == n_res
+    assert len(lammps_data.atoms) == n_res * n_proteins
     assert len(lammps_data.groups) == len(globular_domains)
 
     # hard to assert anything about these, but they should at least not crash
-    write_lammps_data_file(lammps_data)
-    get_lammps_group_definition(lammps_data)
+
+    with Path("out.data").open("w") as f:
+        f.write(write_lammps_data_file(lammps_data))
+
+    with Path("lammps_grp_str").open("w") as f:
+        f.write(get_lammps_group_definition(lammps_data))
 
     # now we test some random util stuff
     residue_positions = prot_data.get_residue_positions()

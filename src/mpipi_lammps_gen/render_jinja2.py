@@ -42,7 +42,7 @@ def render_jinja2(
             shutil.copy(file, working_directory)
 
     # In case we are on a system where there might be a certain
-    # latency in the file system we wait for a small while for all the files to be present
+    # latency in the file system we wait for all the files to be present
     _wait_for_files(
         [template_file, *included_files],
         timeout=latency_wait,
@@ -66,7 +66,7 @@ if __name__ == "__main__":
         "files": {"groups": "./groups.lmp", "data": "./lammps.data"},
     }
 
-    workdir = Path("./workdir")
+    workdir = Path("./jinjaworkdir")
 
     render_jinja2(
         working_directory=workdir,
