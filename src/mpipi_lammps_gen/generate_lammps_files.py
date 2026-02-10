@@ -470,14 +470,15 @@ def generate_lammps_data(
     groups = []
     for idx_domain, domain in enumerate(globular_domains):
         # We first get the indices for the "first" protein
-        id_pairs = domain.to_lammps_indices()
+        id_pairs_single_prot = domain.to_lammps_indices()
 
+        id_pairs = []
         # Then for each protein, we have to add to the groups while offsetting by the number of residues
         for idx_protein in range(n_proteins_total):
             id_pairs.extend(
                 [
                     (i + idx_protein * n_residues, j + idx_protein * n_residues)
-                    for i, j in id_pairs
+                    for i, j in id_pairs_single_prot
                 ]
             )
 
