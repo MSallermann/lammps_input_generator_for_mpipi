@@ -392,16 +392,19 @@ def generate_lammps_data(
         grid_buffer=grid_buffer,
     )
 
-    x_coords = [r[0] for r in protein_positions]
-    y_coords = [r[1] for r in protein_positions]
-    z_coords = [r[2] for r in protein_positions]
+    protein_positions_arr = np.ravel(np.array(protein_positions))
+    protein_positions_arr = protein_positions_arr.reshape(
+        len(protein_positions_arr) // 3, 3
+    )
+
+    x_coords = protein_positions_arr[:, 0]
+    y_coords = protein_positions_arr[:, 1]
+    z_coords = protein_positions_arr[:, 2]
 
     x_lo = np.min(x_coords) - box_buffer
     x_hi = np.max(x_coords) + box_buffer
-
     y_lo = np.min(y_coords) - box_buffer
     y_hi = np.max(y_coords) + box_buffer
-
     z_lo = np.min(z_coords) - box_buffer
     z_hi = np.max(z_coords) + box_buffer
 
