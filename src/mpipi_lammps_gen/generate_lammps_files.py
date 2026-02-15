@@ -634,6 +634,7 @@ def extend_lammps_data(
             bond_id += 1
 
     # groups
+    group_offset = len(lammps_data.groups)
     for idx_domain, domain in enumerate(globular_domains):
         # We first get the indices for the "first" protein
         id_pairs_single_prot = domain.to_lammps_indices()
@@ -643,13 +644,18 @@ def extend_lammps_data(
         for idx_protein in range(n_proteins_total):
             id_pairs.extend(
                 [
-                    (i + idx_protein * n_residues, j + idx_protein * n_residues)
+                    (
+                        i + idx_protein * n_residues + atoms_id_offset,
+                        j + idx_protein * n_residues + atoms_id_offset,
+                    )
                     for i, j in id_pairs_single_prot
                 ]
             )
 
         lammps_data.groups.append(
-            LammpsData.Group(name=f"CD{idx_domain + 1}", id_pairs=id_pairs)
+            LammpsData.Group(
+                name=f"CD{idx_domain + 1 + group_offset}", id_pairs=id_pairs
+            )
         )
 
 
