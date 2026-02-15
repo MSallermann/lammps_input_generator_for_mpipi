@@ -142,9 +142,9 @@ class ProteinData:
 
     def compute_residue_positions(
         self,
-        method: Literal["Ca", "com"]
-        | Iterable[Literal["Ca", "com"]]
-        | Iterable[str] = "Ca",
+        method: (
+            Literal["Ca", "com"] | Iterable[Literal["Ca", "com"]] | Iterable[str]
+        ) = "Ca",
     ) -> list[tuple[float, float, float]] | None:
         if self.atom_types is not None and self.atom_xyz is not None:
             if isinstance(method, str):
@@ -343,6 +343,8 @@ class LammpsData:
     masses: list[MassRow]
     groups: list[Group]
 
+    n_molecules: int
+
     x_lims: tuple[float, float]
     y_lims: tuple[float, float]
     z_lims: tuple[float, float]
@@ -495,7 +497,209 @@ def generate_lammps_data(
         x_lims=(x_lo, x_hi),
         y_lims=(y_lo, y_hi),
         z_lims=(z_lo, z_hi),
+        n_molecules=n_proteins_total,
     )
+
+
+def extend_lammps_data(
+    lammps_data: LammpsData,
+    prot_data: ProteinData,
+    globular_domains: Iterable[GlobularDomain],
+    n_proteins_x: int,
+    n_proteins_y: int,
+    n_proteins_z: int,
+    grid_buffer: float,
+    box_buffer: float,
+    offset_x: float,
+    offset_y: float,
+    offset_z: float,
+):
+    if prot_data.sequence_three_letter is None:
+        prot_data.sequence_three_letter = [
+            __one_to_three__[r] for r in prot_data.sequence_one_letter
+        ]
+
+    def check_if_idx_is_rigid(idx: int) -> bool:
+        return any(glob.is_in_rigid_region(idx) for glob in globular_domains)
+
+    n_residues = len(prot_data.sequence_three_letter)
+
+    # box limits
+    residue_positions = prot_data.get_residue_positions()
+    assert residue_positions is not None
+
+    n_proteins_total = n_proteins_x * n_proteins_y * n_proteins_z
+
+    protein_positions = place_proteins_in_grid(
+        residue_positions=residue_positions,
+        n_proteins_x=n_proteins_x,
+        n_proteins_y=n_proteins_y,
+        n_proteins_z=n_proteins_z,
+        grid_buffer=grid_buffer,
+    )
+
+    protein_positions_arr = np.ravel(np.array(protein_positions))
+    protein_positions_arr = protein_positions_arr.reshape(
+        len(protein_positions_arr) // 3, 3
+    )
+
+    x_coords = protein_positions_arr[:, 0]
+    y_coords = protein_positions_arr[:, 1]
+    z_coords = protein_positions_arr[:, 2]
+
+    x_lo = np.min(x_coords) - box_buffer + offset_x
+    x_hi = np.max(x_coords) + box_buffer + offset_x
+    y_lo = np.min(y_coords) - box_buffer + offset_y
+    y_hi = np.max(y_coords) + box_buffer + offset_y
+    z_lo = np.min(z_coords) - box_buffer + offset_z
+    z_hi = np.max(z_coords) + box_buffer + offset_z
+
+    lammps_data.x_lims = (
+        min(lammps_data.x_lims[0], x_lo),
+        max(lammps_data.x_lims[1], x_hi),
+    )
+    lammps_data.y_lims = (
+        min(lammps_data.y_lims[0], y_lo),
+        max(lammps_data.y_lims[1], y_hi),
+    )
+    lammps_data.z_lims = (
+        min(lammps_data.z_lims[0], z_lo),
+        max(lammps_data.z_lims[1], z_hi),
+    )
+
+    atoms_id_offset = len(lammps_data.atoms) + 1
+    molecule_id_offset = lammps_data.n_molecules
+
+    # Fill in the atom section
+    for idx_protein in range(n_proteins_total):
+        for idx_residue in range(n_residues):
+            res_info = prot_data.residue_info(idx_residue)
+
+            # asserts for static type checker
+            assert res_info is not None
+            assert res_info.three_letter is not None
+
+            is_rigid = check_if_idx_is_rigid(idx_residue)
+
+            atom_type = AminoID[res_info.three_letter][0]
+
+            if is_rigid:
+                atom_type += len(AminoID)
+
+            # atom_id has to be unique for every atom
+            atom_id = (idx_residue + 1) + n_residues * idx_protein
+
+            lammps_data.atoms.append(
+                LammpsData.AtomRow(
+                    atom_id=atom_id
+                    + atoms_id_offset,  # remember to increment indices...
+                    # remember to increment indices...
+                    molecule_tag=idx_protein + 1 + molecule_id_offset,
+                    atom_type=atom_type,
+                    q=0.0,
+                    x=protein_positions[idx_protein][idx_residue][0] + offset_x,
+                    y=protein_positions[idx_protein][idx_residue][1] + offset_y,
+                    z=protein_positions[idx_protein][idx_residue][2] + offset_z,
+                )
+            )
+
+    # Compute bond info
+
+    bond_id = len(lammps_data.bonds) + 1
+
+    # Within globular domains, bonds are skipped
+    for idx_protein in range(n_proteins_total):
+        for idx_residue in range(n_residues - 1):
+            first_rigid = check_if_idx_is_rigid(idx_residue)
+            second_rigid = check_if_idx_is_rigid(idx_residue + 1)
+
+            # if both residues are rigid, we skip the bond
+            if first_rigid and second_rigid:
+                continue
+
+            atom_id_1 = (idx_residue + 1) + n_residues * idx_protein
+            atom_id_2 = (idx_residue + 2) + n_residues * idx_protein
+
+            # in this case we are either in an IDR or we are connecting a globular domain to an IDR
+            lammps_data.bonds.append(
+                LammpsData.BondRow(
+                    bond_id=bond_id,
+                    bond_type=1,
+                    atom_1=atom_id_1
+                    + atoms_id_offset,  # remember to increment indices...
+                    atom_2=atom_id_2
+                    + atoms_id_offset,  # remember to increment indices...
+                )
+            )
+            bond_id += 1
+
+    # groups
+    for idx_domain, domain in enumerate(globular_domains):
+        # We first get the indices for the "first" protein
+        id_pairs_single_prot = domain.to_lammps_indices()
+
+        id_pairs = []
+        # Then for each protein, we have to add to the groups while offsetting by the number of residues
+        for idx_protein in range(n_proteins_total):
+            id_pairs.extend(
+                [
+                    (i + idx_protein * n_residues, j + idx_protein * n_residues)
+                    for i, j in id_pairs_single_prot
+                ]
+            )
+
+        lammps_data.groups.append(
+            LammpsData.Group(name=f"CD{idx_domain + 1}", id_pairs=id_pairs)
+        )
+
+
+# def generate_lammps_data_idp_mixtures(
+#     prot_data_list: Iterable[ProteinData],
+#     n_proteins_x_list: list[int],
+#     n_proteins_y_list: list[int],
+#     n_proteins_z_list: list[int],
+#     box_buffer: float = 20.0,
+#     grid_buffer: float = 6.0,
+# ):
+
+#     # mass info
+#     mass_section = []
+
+#     mass_section.extend(
+#         LammpsData.MassRow(atom_type=v[0], mass_value=v[2]) for v in AminoID.values()
+#     )
+#     mass_section.extend(
+#         LammpsData.MassRow(atom_type=v[0] + len(AminoID), mass_value=v[2])
+#         for v in AminoID.values()
+#     )
+
+#     offset = np.zeros(3)
+
+#     for prot_data, n_proteins_x, n_proteins_y, n_proteins_z in zip(
+#         prot_data_list,
+#         n_proteins_x_list,
+#         n_proteins_y_list,
+#         n_proteins_z_list,
+#         strict=True,
+#     ):
+
+#         residue_positions = prot_data.get_residue_positions()
+#         assert residue_positions is not None
+
+#         # n_proteins_total = n_proteins_x * n_proteins_y * n_proteins_z
+
+#         protein_positions = place_proteins_in_grid(
+#             residue_positions=residue_positions,
+#             n_proteins_x=n_proteins_x,
+#             n_proteins_y=n_proteins_y,
+#             n_proteins_z=n_proteins_z,
+#             grid_buffer=grid_buffer,
+#         )
+
+#         protein_positions_arr = np.ravel(np.array(protein_positions))
+#         protein_positions_arr = protein_positions_arr.reshape(
+#             len(protein_positions_arr) // 3, 3
+#         )
 
 
 def write_lammps_data_file(lammps_data: LammpsData) -> str:
