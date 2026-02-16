@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 import networkx as nx
+import numpy as np
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable, Sequence
@@ -147,3 +148,73 @@ def merge_domains(
         new_domains.append(g)
 
     return new_domains
+
+
+def build_protein_graph(n_residues: int, domains: Sequence[GlobularDomain]) -> nx.Graph:
+    graph = nx.Graph()
+
+    # add all the groups as nodes
+    for i, _ in enumerate(domains):
+        graph.add_node(f"CD{i}")
+
+    def belongs_to_group(idx_residue: int) -> int | None:
+        for i, d in enumerate(domains):
+            if d.is_in_rigid_region(idx_residue):
+                return i
+
+        return None
+
+    for i_res in range(n_residues):
+        # if the residue does not belong to any of the domains we add a node
+        this_grp_idx = belongs_to_group(i_res)
+
+        if this_grp_idx is None:
+            this_node = f"Res{i_res}"
+            graph.add_node(this_node)
+        else:
+            this_node = f"CD{this_grp_idx}"
+
+        # now decide which edges to add
+        if i_res > 0:
+            i_res_prev = i_res - 1
+            prev_grp_idx = belongs_to_group(i_res_prev)
+
+            if prev_grp_idx is None:
+                prev_node = f"Res{i_res_prev}"
+            else:
+                prev_node = f"CD{prev_grp_idx}"
+
+            graph.add_edge(prev_node, this_node)
+
+    return graph
+
+
+def shortest_path_matrix(
+    n_residues: int, domains: Sequence[GlobularDomain], protein_graph: nx.Graph
+):
+    distance_matrix = np.zeros((n_residues, n_residues))
+
+    def get_grp_node(idx_residue: int) -> str | None:
+        for i, d in enumerate(domains):
+            if d.is_in_rigid_region(idx_residue):
+                return f"CD{i}"
+
+        return None
+
+    def get_node(i_res: int) -> str:
+        grp_node = get_grp_node(i_res)
+        if grp_node is not None:
+            return grp_node
+        return f"Res{i_res}"
+
+    for i in range(n_residues):
+        node_i = get_node(i)
+        for j in range(i + 1, n_residues):
+            node_j = get_node(j)
+
+            path_len = nx.shortest_path_length(protein_graph, node_i, node_j)
+
+            distance_matrix[i, j] = path_len
+            distance_matrix[j, i] = path_len
+
+    return distance_matrix
