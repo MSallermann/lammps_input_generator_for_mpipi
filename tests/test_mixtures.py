@@ -7,12 +7,12 @@ from mpipi_lammps_gen.generate_lammps_files import (
     write_lammps_data_file,
 )
 from mpipi_lammps_gen.globular_domains import GlobularDomain
-from mpipi_lammps_gen.util import sequence_to_prot_data_spiral
+from mpipi_lammps_gen.util import sequence_to_prot_data_spiral, sequence_to_snake
 
 
 def test_mixtures():
     # Set up two proteins
-    p1 = sequence_to_prot_data_spiral("PR" * 25)
+    p1 = sequence_to_snake("PR" * 25, 3.8)
     domains1 = [GlobularDomain([(2, 8), (11, 16)])]
 
     p2 = sequence_to_prot_data_spiral("A" * 35)
@@ -20,7 +20,13 @@ def test_mixtures():
 
     lammps_data = initialize_lammps_data()
     add_proteins_to_lammps_data(
-        lammps_data, p1, domains1, n_proteins_x=2, n_proteins_y=2, n_proteins_z=2
+        lammps_data,
+        p1,
+        domains1,
+        n_proteins_x=2,
+        n_proteins_y=2,
+        n_proteins_z=2,
+        grid_buffer=3.8,
     )
 
     add_proteins_to_lammps_data(
@@ -31,6 +37,7 @@ def test_mixtures():
         n_proteins_y=2,
         n_proteins_z=1,
         offset_z=lammps_data.z_lims[1] - lammps_data.z_lims[0] + 5,
+        grid_buffer=-2,
     )
 
     grps = get_lammps_group_definition(lammps_data)
