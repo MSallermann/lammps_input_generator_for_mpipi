@@ -560,7 +560,9 @@ def get_lammps_group_definition(lammps_data: LammpsData) -> str:
             + "\n"
         )
     else:
-        res += "group nonrigid union all"
+        res += "group nonrigid union all\n"
+
+    res += "group rigid subtract all nonrigid\n"
 
     # neigh modify to exclude intra molecule interaction
     for g in lammps_data.groups:
@@ -629,6 +631,7 @@ def get_lammps_nvt_command(
     n_time_steps: int,
     dt_ramp_up: list[float] | None = None,
     lange_damp: float = 1000.0,
+    tdamp: float = 1000.0,
     steps_per_stage: int = 10000,
     seed: int = 34278,
 ) -> str:
@@ -638,7 +641,7 @@ def get_lammps_nvt_command(
     res = "# Running NVT ... \n"
 
     for num, g in enumerate(lammps_data.groups):
-        res += f"fix fxnverigid{num} {g.name} rigid/nvt molecule temp {temp} {temp} 1000.0\n"
+        res += f"fix fxnverigid{num} {g.name} rigid/nvt molecule temp {temp} {temp} {tdamp}\n"
 
     res += "fix fxnve nonrigid nve\n"
     res += f"fix fxlange nonrigid langevin {temp} {temp} {lange_damp} {seed}\n"
@@ -675,6 +678,7 @@ def get_lammps_npt_command(
     pdamp: float = 1000.0,
     lange_damp: float = 1000.0,
     seed: int = 34278,
+    tdamp: float = 1000.0,
 ) -> str:
     if dt_ramp_up is None:
         dt_ramp_up = []
@@ -682,7 +686,7 @@ def get_lammps_npt_command(
     res = "# Running NPT ... \n"
 
     for num, g in enumerate(lammps_data.groups):
-        res += f"fix fxnverigid{num} {g.name} rigid/nvt molecule temp {temp} {temp} 1000.0\n"
+        res += f"fix fxnverigid{num} {g.name} rigid/nvt molecule temp {temp} {temp} {tdamp}\n"
 
     # barostat only
     res += f"fix fxbaro nonrigid nph iso {press} {press} {pdamp} dilate all\n"
@@ -712,7 +716,7 @@ def get_lammps_npt_command(
 
 
 def get_lammps_npt_command_rigid(
-    lammps_data: LammpsData,
+    lammps_data: LammpsData,  # noqa: ARG001
     timestep: float,
     temp: float,
     press: float,
@@ -729,8 +733,7 @@ def get_lammps_npt_command_rigid(
 
     res = "# Running NPT ... \n"
 
-    for num, g in enumerate(lammps_data.groups):
-        res += f"fix fxnverigid{num} {g.name} rigid/npt molecule temp {temp} {temp} {tdamp} iso {press} {press} {pdamp} dilate all\n"
+    res += f"fix fxnptrigid rigid rigid/npt molecule temp {temp} {temp} {tdamp} iso {press} {press} {pdamp} dilate all\n"
 
     # langevin thermostat
     res += f"fix fxlange nonrigid langevin {temp} {temp} {lange_damp} {seed}\n"
@@ -747,9 +750,7 @@ def get_lammps_npt_command_rigid(
     res += f"run {n_time_steps}\n"
 
     # unfix
-    for num, _ in enumerate(lammps_data.groups):
-        res += f"unfix fxnverigid{num}\n"
-
+    res += "unfix fxnptrigid\n"
     res += "unfix fxlange\n"
 
     return res
