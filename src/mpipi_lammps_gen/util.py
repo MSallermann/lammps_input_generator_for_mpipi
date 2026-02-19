@@ -72,6 +72,47 @@ def sequence_to_prot_data_spiral(
     )
 
 
+def sequence_to_snake(seq: str, distance: float) -> ProteinData:
+    assert is_valid_one_letter_sequence(seq)
+
+    n_residues = len(seq)
+    n = round(n_residues ** (1 / 3))
+
+    res_positions = []
+
+    dir_x = 1
+    ix = 0
+    dir_y = 1
+    iy = 0
+    iz = 0
+
+    while len(res_positions) < n_residues:
+        res_positions.append((distance * ix, distance * iy, distance * iz))
+
+        if (dir_x == 1 and ix <= n - 2) or (dir_x == -1 and ix > 0):
+            ix += dir_x
+        else:
+            dir_x *= -1
+
+            if (dir_y == 1 and iy < n - 1) or (dir_y == -1 and iy > 0):
+                iy += dir_y
+            else:
+                dir_y *= -1
+                iz += 1
+
+    plddts = [0.0] * len(seq)
+
+    return ProteinData(
+        atom_xyz=None,
+        atom_types=None,
+        residue_positions=res_positions,
+        sequence_one_letter=list(seq),
+        sequence_three_letter=None,
+        pae=None,
+        plddts=plddts,
+    )
+
+
 def read_polars(inp: Path | str) -> pl.DataFrame:
     inp = Path(inp)
     if inp.suffix.lower() == ".parquet":
