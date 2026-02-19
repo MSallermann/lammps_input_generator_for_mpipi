@@ -28,12 +28,22 @@ class GlobularDomain:
     def size_total(self) -> int:
         return self.end_idx() - self.start_idx()
 
+    def n_atoms(self) -> int:
+        return sum(t[1] - t[0] for t in self.indices)
+
     def is_in_rigid_region(self, idx: int) -> bool:
         return any(idx >= t[0] and idx <= t[1] for t in self.indices)
 
     def to_lammps_indices(self) -> list[tuple[int, int]]:
         """Returns the indices with a +1 added, since LAMMPS counts from 1."""
         return [(t[0] + 1, t[1] + 1) for t in self.indices]
+
+    def get_all_indices(self) -> list[int]:
+        """Returns a flat list containing all the indices of residues in the group"""
+        indices = []
+        for t in self.indices:
+            indices.extend(range(t[0], t[1] + 1))
+        return indices
 
     @staticmethod
     def merge(g1: GlobularDomain, g2: GlobularDomain) -> GlobularDomain:
@@ -218,3 +228,122 @@ def shortest_path_matrix(
             distance_matrix[j, i] = path_len
 
     return distance_matrix
+
+
+def protein_topology(
+    n_residues: int,
+    domains: Sequence[GlobularDomain],
+) -> nx.Graph:
+    graph = nx.Graph()
+
+    # add all the groups as nodes
+    for i, d in enumerate(domains):
+        graph.add_node(f"CD{i}", weight=d.n_atoms())
+
+    # add a start and an end node
+    graph.add_node("start", weight=1)
+    graph.add_node("end", weight=1)
+
+    def get_grp_idx(idx_residue: int) -> int | None:
+        for i, d in enumerate(domains):
+            if d.is_in_rigid_region(idx_residue):
+                return i
+
+        return None
+
+    # starting node of the current edge
+    edge_start = "start"
+    edge_start_idx = 0
+    grp_idx_prev_res = None
+
+    last_proper_group = "start"
+
+    for i_res in range(n_residues):
+        this_grp_idx = get_grp_idx(i_res)
+
+        # only add an edge if the previous node was not in this group
+        if this_grp_idx is not None and this_grp_idx != grp_idx_prev_res:
+            graph.add_edge(
+                edge_start,
+                f"CD{this_grp_idx}",
+                length=i_res - edge_start_idx,
+                weight=1.0 / (i_res - edge_start_idx + 1),
+                loop=(edge_start == f"CD{this_grp_idx}"),
+            )
+            last_proper_group = f"CD{this_grp_idx}"
+        elif (
+            this_grp_idx is None and grp_idx_prev_res is not None
+        ):  # leaving a group, start counting for an edge again
+            edge_start = f"CD{grp_idx_prev_res}"
+            edge_start_idx = i_res - 1
+
+        grp_idx_prev_res = this_grp_idx
+
+    graph.add_edge(last_proper_group, "end", length=n_residues - 1 - edge_start_idx)
+
+    return graph
+
+
+def protein_topology2(
+    n_residues: int,
+    domains: Sequence[GlobularDomain],
+    # residue_positions: list[tuple[float, float, float]],
+) -> nx.Graph:
+    graph = nx.Graph()
+
+    # add a start and an end node
+    graph.add_node("start", weight=1)
+    graph.add_node("end", weight=1)
+
+    # add all the groups as nodes
+    for i, d in enumerate(domains):
+        graph.add_node(f"CD{i}", weight=d.n_atoms(), indices=set(d.get_all_indices()))
+
+    def get_grp_idx(idx_residue: int) -> int | None:
+        for i, d in enumerate(domains):
+            if d.is_in_rigid_region(idx_residue):
+                return i
+
+        return None
+
+    # starting node of the current edge
+    edge_start = "start"
+    edge_start_idx = 0
+
+    grp_idx_prev_res = None
+
+    last_proper_group = "start"
+
+    for i_res in range(n_residues):
+        this_grp_idx = get_grp_idx(i_res)
+
+        if this_grp_idx is not None and this_grp_idx != grp_idx_prev_res:
+            # we end the current edge
+            graph.add_edge(
+                edge_start,
+                f"CD{this_grp_idx}",
+                length=i_res - edge_start_idx,
+                weight=1.0 / (i_res - edge_start_idx + 1),
+                start_idx=edge_start_idx,
+                end_idx=i_res,
+                loop=(edge_start == f"CD{this_grp_idx}"),
+            )
+            last_proper_group = f"CD{this_grp_idx}"
+        elif (
+            this_grp_idx is None and grp_idx_prev_res is not None
+        ):  # leaving a group, start counting for an edge again
+            edge_start = f"CD{grp_idx_prev_res}"
+            edge_start_idx = i_res - 1
+
+        grp_idx_prev_res = this_grp_idx
+
+    graph.add_edge(
+        last_proper_group,
+        "end",
+        length=n_residues - 1 - edge_start_idx,
+        start_idx=edge_start_idx,
+        end_idx=n_residues - 1,
+        loop=False,
+    )
+
+    return graph
