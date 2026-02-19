@@ -32,6 +32,10 @@ AminoID = {
     "ILE": [20, 6.18, 113.2],
 }
 
+type_to_name = {v[0]: k for k, v in AminoID.items()}
+type_to_name.update({v[0] + len(AminoID): k + "_GLOB" for k, v in AminoID.items()})
+
+
 __three_to_one__ = {
     "GLY": "G",
     "ALA": "A",
@@ -55,28 +59,7 @@ __three_to_one__ = {
     "GLN": "Q",
 }
 
-__one_to_three__ = {
-    "G": "GLY",
-    "A": "ALA",
-    "V": "VAL",
-    "L": "LEU",
-    "I": "ILE",
-    "T": "THR",
-    "S": "SER",
-    "M": "MET",
-    "C": "CYS",
-    "P": "PRO",
-    "F": "PHE",
-    "Y": "TYR",
-    "W": "TRP",
-    "H": "HIS",
-    "K": "LYS",
-    "R": "ARG",
-    "D": "ASP",
-    "E": "GLU",
-    "N": "ASN",
-    "Q": "GLN",
-}
+__one_to_three__ = {v: k for k, v in __three_to_one__.items()}
 
 
 def is_valid_one_letter_sequence(seq: str | Iterable[str]):
@@ -583,7 +566,8 @@ def write_lammps_data_file(lammps_data: LammpsData) -> str:
     if len(lammps_data.masses) > 0:
         res += "Masses\n\n"
         for row in lammps_data.masses:
-            res += f"{row.atom_type:.0f} {row.mass_value}\n"
+            name = type_to_name.get(row.atom_type)
+            res += f"{row.atom_type:.0f} {row.mass_value} # {name}\n"
 
     if len(lammps_data.atoms) > 0:
         res += "\n"
@@ -591,7 +575,8 @@ def write_lammps_data_file(lammps_data: LammpsData) -> str:
         res += "\n"
 
         for row in lammps_data.atoms:
-            res += f"{row.atom_id:.0f} {row.molecule_tag:.0f} {row.atom_type:.0f} {row.q} {row.x} {row.y} {row.z}\n"
+            name = type_to_name.get(row.atom_type)
+            res += f"{row.atom_id:.0f} {row.molecule_tag:.0f} {row.atom_type:.0f} {row.q} {row.x} {row.y} {row.z} # {name}\n"
 
     if len(lammps_data.bonds) > 0:
         res += "\n"
