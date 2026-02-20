@@ -53,12 +53,31 @@ class GlobularDomain:
 
         return GlobularDomain(indices=g2.indices + g1.indices)
 
+    @staticmethod
+    def fuse(g1: GlobularDomain, g2: GlobularDomain) -> GlobularDomain:
+        # Make sure thet the indices keep monotonically increasing
+        if g2.end_idx() < g1.start_idx():
+            return GlobularDomain.fuse(g2, g1)
+
+        new_indices = g1.indices[:-1]
+
+        if len(g1.indices) == 0:
+            new_indices.extend(g2.indices)
+        elif len(g2.indices) == 0:
+            new_indices.extend(g1.indices)
+        else:
+            new_indices.append((g1.indices[-1][0], g2.indices[0][1]))
+            new_indices.extend(g2.indices[1:])
+
+        return GlobularDomain(new_indices)
+
 
 def decide_globular_domains_from_sequence(
     plddts: Iterable[float],
     threshold: float = 70.0,
     minimum_domain_length: int = 3,
     minimum_idr_length: int = 3,
+    fuse: bool = True,
 ) -> list[GlobularDomain]:
     in_globular_domain = [p > threshold for p in plddts]
     n_res = len(in_globular_domain)
@@ -117,7 +136,11 @@ def decide_globular_domains_from_sequence(
                 idx
             )  # We remove domain 1 and merge it into domain2
             # we just set both pairs to the new "merged" value
-            globular_domains[idx + 1].indices = list(domain1.indices + domain2.indices)
+
+            if fuse:
+                globular_domains[idx + 1] = GlobularDomain.fuse(domain1, domain2)
+            else:
+                globular_domains[idx + 1] = GlobularDomain.merge(domain1, domain2)
 
     # iterate in reverse order, because then the lower indices do not change due to the `pop`
     for i in sorted(indices_to_remove, reverse=True):
@@ -129,6 +152,7 @@ def decide_globular_domains_from_sequence(
 def merge_domains(
     domains: Sequence[GlobularDomain],
     should_be_merged: Callable[[GlobularDomain, GlobularDomain], bool],
+    fuse: bool = False,
 ) -> list[GlobularDomain]:
     n_domains = len(domains)
 
@@ -154,7 +178,10 @@ def merge_domains(
     for comp in components:
         g = GlobularDomain([])
         for i in comp:
-            g = GlobularDomain.merge(g, domains[i])
+            if fuse:
+                g = GlobularDomain.fuse(g, domains[i])
+            else:
+                g = GlobularDomain.merge(g, domains[i])
         new_domains.append(g)
 
     return new_domains
