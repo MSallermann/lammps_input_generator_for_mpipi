@@ -97,6 +97,9 @@ class ProteinData:
     plddts: list[float] | None
     pae: list[list[float]] | None
 
+    def n_residues(self) -> int:
+        return len(self.sequence_one_letter)
+
     def compute_residue_position(
         self,
         types: list[str],
