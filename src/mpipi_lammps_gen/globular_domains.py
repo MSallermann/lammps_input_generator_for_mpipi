@@ -319,3 +319,222 @@ def protein_topology(
     )
 
     return graph
+
+
+def _find_node_of_residue(graph: nx.Graph, i1: int) -> str | None:
+    for n, data in graph.nodes(data=True):
+        if "indices" in data and i1 in data["indices"]:
+            return n
+    return None
+
+
+def _find_edge_of_residue(graph: nx.Graph, i1: int) -> tuple[str, str] | None:
+    for source, target, data in graph.edges(data=True):
+        if data["start_idx"] <= i1 and data["end_idx"] >= i1:
+            return (source, target)
+    return None
+
+
+def _find_connected_indices(graph: nx.Graph, n1: str, n2: str) -> tuple[int, int]:
+    """Find the indices."""
+
+    neighbours = graph[n1]
+
+    if n2 not in neighbours:
+        msg = f"{n1} and {n2} do not seem to be connected by an edge."
+        raise Exception(msg)
+
+    edge = neighbours[n2]
+
+    edge_start_idx = edge["start_idx"]
+    edge_end_idx = edge["end_idx"]
+
+    n1_indices = graph.nodes[n1]["indices"]
+    n2_indices = graph.nodes[n2]["indices"]
+
+    if edge_start_idx in n1_indices and edge_end_idx in n2_indices:
+        idx1 = edge_start_idx
+        idx2 = edge_end_idx
+    elif edge_start_idx in n2_indices and edge_end_idx in n1_indices:
+        idx1 = edge_end_idx
+        idx2 = edge_start_idx
+    else:
+        msg = "Could not find edge start/end indices in nodes."
+        raise Exception(msg)
+
+    return (idx1, idx2)
+
+
+@dataclass
+class PathProperties:
+    path: list[str]
+    n_random_segments: int
+    n_random_segments_offset: int
+    fixed_distances: list[float]
+    loops: list[tuple[int, int]]
+    n1: str | None
+    n2: str | None
+    e1: tuple[str, str] | None
+    e2: tuple[str, str] | None
+    node_path_start: str
+    node_path_end: str
+
+
+def get_path_properties(  # noqa: PLR0912, PLR0915
+    graph: nx.Graph,
+    i1: int,
+    i2: int,
+    _residue_positions: list[tuple[float, float, float]],
+) -> PathProperties:
+    residue_positions = np.asarray(_residue_positions, dtype=float)  # type: ignore
+
+    # Quickly check some indices
+    if i1 < 0 or i2 < 0:
+        msg = "Indices must be larger than zero"
+        raise Exception(msg)
+
+    if i1 >= len(residue_positions) or i2 >= len(residue_positions):
+        msg = f"Indices must be smaller than the number of residues ({len(residue_positions)})"
+        raise Exception(msg)
+
+    # this offset is necessary because some residues might lie in the "middle" of an edge
+    # ... since we count the entire edge, from source to target, when we loop over the shortest paths later
+    # ... we record an offset to correct for this
+    n_random_segments_offset: int = 0
+
+    # A shortest path might originate or end in a looped IDR
+    # ... in this list we record (idx_within_loop, length_of_loop) tuples
+    loops: list[tuple[int, int]] = []
+
+    # first we check if the initial/final residues lie within a node
+    # ... this happens if they lie within a globular domain
+    n1 = _find_node_of_residue(graph, i1)
+    n2 = _find_node_of_residue(graph, i2)
+
+    # if not, we check if they are within an edge
+    # ... this happens if they lie within an IDR
+    e1 = None
+    is_loop1 = False
+    if n1 is None:
+        e1 = _find_edge_of_residue(graph, i1)
+        assert e1 is not None
+
+        # we have to make sure that we get the source and target of
+        # the edge in the same order they occur in the protein
+        # ... this is not guaranteed by the (src,target) tuple returned by `find_edge_of_residue`
+        idx1, idx2 = _find_connected_indices(graph=graph, n1=e1[0], n2=e1[1])
+        node_path_start = e1[0] if idx1 < idx2 else e1[1]
+
+        # we should only count the offset if the edge is not a loop,
+        # because if it is a loop it will not count towards n_random_segments anyways
+        is_loop1 = graph.edges[e1]["loop"]
+
+        if not is_loop1:
+            n_random_segments_offset += graph.edges[e1]["start_idx"] - i1
+        else:
+            idx_in_loop = int(i1 - graph.edges[e1]["start_idx"])
+            length_loop = int(graph.edges[e1]["length"])
+            loops.append((idx_in_loop, length_loop))
+    else:
+        node_path_start = n1
+
+    e2 = None
+    is_loop2 = False
+    if n2 is None:
+        e2 = _find_edge_of_residue(graph, i2)
+        assert e2 is not None
+
+        # we have to make sure that we get the source and target of
+        # the edge in the same order they occur in the protein
+        # ... this is not guaranteed by the (src,target) tuple returned by `find_edge_of_residue`
+        idx1, idx2 = _find_connected_indices(graph=graph, n1=e2[0], n2=e2[1])
+
+        node_path_end = e2[1] if idx1 < idx2 else e2[0]
+
+        # we should only count the offset if the edge is not a loop,
+        # because if it is a loop it will not count towarss n_random_segments anyways
+        is_loop2 = graph.edges[e2]["loop"]
+        if not is_loop2:
+            n_random_segments_offset += i2 - graph.edges[e2]["end_idx"]
+        else:
+            idx_in_loop = int(i2 - graph.edges[e2]["start_idx"])
+            length_loop = int(graph.edges[e2]["length"])
+            loops.append((idx_in_loop, length_loop))
+    else:
+        node_path_end = n2
+
+    # We find the shortest path
+    path = nx.shortest_path(graph, node_path_start, node_path_end)
+    n_random_segments: int = n_random_segments_offset
+    fixed_distances: list[float] = []
+
+    # Handle the starting point
+    if (
+        n1 is not None
+    ):  # ... this means the starting residue lies within a globular domain
+        # we have to add the distance from the starting residue to the point at which it leaves the domain
+        idx1, idx2 = _find_connected_indices(graph, path[0], path[1])
+        dist = np.linalg.norm(residue_positions[i1] - residue_positions[idx1])
+        if dist > 0.0:
+            fixed_distances.append(float(dist))
+    elif is_loop1:
+        # if we have a loop, we add the shorter of the two anchor distances
+        idx1, idx2 = _find_connected_indices(graph, path[0], path[1])
+        idx_anchor_1, idx_anchor_2 = _find_connected_indices(graph, path[0], path[0])
+        dist1 = np.linalg.norm(
+            residue_positions[idx_anchor_1] - residue_positions[idx1]
+        )
+        dist2 = np.linalg.norm(
+            residue_positions[idx_anchor_2] - residue_positions[idx1]
+        )
+        fixed_distances.append(float(min(dist1, dist2)))
+
+    # Handle the end point
+    if n2 is not None:  # ... this means the end residue lies within a globular domain
+        # we have to add the distance from the end residue to the point at which the last domain was entered
+        idx1, idx2 = _find_connected_indices(graph, path[-1], path[-2])
+        dist = np.linalg.norm(residue_positions[i2] - residue_positions[idx1])
+        if dist > 0.0:
+            fixed_distances.append(float(dist))
+    elif is_loop1:
+        # if we have a loop, we add the shorter of the two anchor distances
+        idx1, idx2 = _find_connected_indices(graph, path[-1], path[-2])
+        idx_anchor_1, idx_anchor_2 = _find_connected_indices(graph, path[-1], path[-1])
+        dist1 = np.linalg.norm(
+            residue_positions[idx_anchor_1] - residue_positions[idx1]
+        )
+        dist2 = np.linalg.norm(
+            residue_positions[idx_anchor_2] - residue_positions[idx1]
+        )
+        fixed_distances.append(float(min(dist1, dist2)))
+
+    for i, _ in enumerate(path):
+        # This computes the length of the edge between the previous and the current node
+        if i >= 1:
+            idx1, idx2 = _find_connected_indices(graph, path[i], path[i - 1])
+            n_random_segments += int(np.abs(idx2 - idx1))
+
+        # for each globular domain we pass through, we record the distance from enter to exit
+        if i >= 1 and i < len(path) - 1:
+            enter_idx, _ = _find_connected_indices(graph, n1=path[i], n2=path[i - 1])
+            exit_idx, _ = _find_connected_indices(graph, n1=path[i], n2=path[i + 1])
+
+            dist = np.linalg.norm(
+                residue_positions[exit_idx] - residue_positions[enter_idx]
+            )
+
+            fixed_distances.append(float(dist))
+
+    return PathProperties(
+        path=path,
+        n_random_segments=n_random_segments,
+        n_random_segments_offset=n_random_segments_offset,
+        fixed_distances=fixed_distances,
+        loops=loops,
+        n1=n1,
+        n2=n2,
+        e1=e1,
+        e2=e2,
+        node_path_start=node_path_start,
+        node_path_end=node_path_end,
+    )

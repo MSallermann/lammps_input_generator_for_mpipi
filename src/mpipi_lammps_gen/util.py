@@ -72,6 +72,34 @@ def sequence_to_prot_data_spiral(
     )
 
 
+def sequence_to_line(
+    seq: str,
+    distance: float = 3.8,
+) -> ProteinData:
+    assert is_valid_one_letter_sequence(seq)
+
+    res_positions = [
+        (
+            0.0,
+            0.0,
+            distance * idx_res,
+        )
+        for idx_res in range(len(seq))
+    ]
+
+    plddts = [0.0] * len(seq)
+
+    return ProteinData(
+        atom_xyz=None,
+        atom_types=None,
+        residue_positions=res_positions,
+        sequence_one_letter=list(seq),
+        sequence_three_letter=None,
+        pae=None,
+        plddts=plddts,
+    )
+
+
 def sequence_to_snake(seq: str, distance: float) -> ProteinData:
     assert is_valid_one_letter_sequence(seq)
 

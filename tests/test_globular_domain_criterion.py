@@ -1,8 +1,13 @@
+import numpy as np
+
 from mpipi_lammps_gen.globular_domains import (
     GlobularDomain,
     decide_globular_domains_from_sequence,
+    get_path_properties,
     merge_domains,
+    protein_topology,
 )
+from mpipi_lammps_gen.util import sequence_to_line
 
 
 def test_globular_domain_criterion():
@@ -76,8 +81,39 @@ def test_merge_domains():
 
     new_domains = merge_domains(domains, should_be_merged)
 
-    print(new_domains)
-
     assert len(new_domains) == 2
     assert new_domains[0].start_idx() == 0
     assert new_domains[0].end_idx() == 5
+
+
+def test_protein_topology():
+    seq = "P" * 50
+    prot_data = sequence_to_line(seq, distance=1.0)
+
+    domains = [
+        GlobularDomain([(5, 10), (14, 17)]),
+        GlobularDomain([(22, 25)]),
+        GlobularDomain([(30, 33), (36, 40)]),
+    ]
+
+    graph = protein_topology(prot_data.n_residues(), domains)
+
+    assert prot_data.residue_positions is not None
+
+    i1 = 0
+    i2 = 45
+    path_stats = get_path_properties(graph, i1, i2, prot_data.residue_positions)
+
+    print(path_stats)
+
+    assert path_stats.n_random_segments == 20
+    assert np.all(np.isclose(path_stats.fixed_distances, [12.0, 3.0, 10.0]))
+    assert len(path_stats.loops) == 0
+
+    i1 = 12
+    i2 = 35
+    path_stats = get_path_properties(graph, i1, i2, prot_data.residue_positions)
+    print(path_stats)
+    assert path_stats.n_random_segments == 10
+    assert np.all(np.isclose(path_stats.fixed_distances, [3.0, 3.0, 3.0]))
+    assert len(path_stats.loops) == 2
