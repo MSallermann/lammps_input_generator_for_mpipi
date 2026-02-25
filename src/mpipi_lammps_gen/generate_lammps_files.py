@@ -745,9 +745,9 @@ def get_lammps_npt_command(
 
     # barostat only
     if use_berendsen:
-        res += f"fix fxbaro nonrigid nph iso {press} {press} {pdamp} dilate all\n"
-    else:
         res += f"fix fxbaro nonrigid press/berendsen iso {press} {press} {pdamp} dilate all\n"
+    else:
+        res += f"fix fxbaro nonrigid nph iso {press} {press} {pdamp} dilate all\n"
 
     # langevin thermostat
     res += f"fix fxlange nonrigid langevin {temp} {temp} {lange_damp} {seed}\n"
