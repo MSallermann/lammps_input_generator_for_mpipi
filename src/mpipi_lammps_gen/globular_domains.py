@@ -263,64 +263,9 @@ def protein_topology(
 ) -> nx.Graph:
     graph = nx.Graph()
 
-    # add all the groups as nodes
-    for i, d in enumerate(domains):
-        graph.add_node(f"CD{i}", weight=d.n_atoms())
-
     # add a start and an end node
-    graph.add_node("start", weight=1)
-    graph.add_node("end", weight=1)
-
-    def get_grp_idx(idx_residue: int) -> int | None:
-        for i, d in enumerate(domains):
-            if d.is_in_rigid_region(idx_residue):
-                return i
-
-        return None
-
-    # starting node of the current edge
-    edge_start = "start"
-    edge_start_idx = 0
-    grp_idx_prev_res = None
-
-    last_proper_group = "start"
-
-    for i_res in range(n_residues):
-        this_grp_idx = get_grp_idx(i_res)
-
-        # only add an edge if the previous node was not in this group
-        if this_grp_idx is not None and this_grp_idx != grp_idx_prev_res:
-            graph.add_edge(
-                edge_start,
-                f"CD{this_grp_idx}",
-                length=i_res - edge_start_idx,
-                weight=1.0 / (i_res - edge_start_idx + 1),
-                loop=(edge_start == f"CD{this_grp_idx}"),
-            )
-            last_proper_group = f"CD{this_grp_idx}"
-        elif (
-            this_grp_idx is None and grp_idx_prev_res is not None
-        ):  # leaving a group, start counting for an edge again
-            edge_start = f"CD{grp_idx_prev_res}"
-            edge_start_idx = i_res - 1
-
-        grp_idx_prev_res = this_grp_idx
-
-    graph.add_edge(last_proper_group, "end", length=n_residues - 1 - edge_start_idx)
-
-    return graph
-
-
-def protein_topology2(
-    n_residues: int,
-    domains: Sequence[GlobularDomain],
-    # residue_positions: list[tuple[float, float, float]],
-) -> nx.Graph:
-    graph = nx.Graph()
-
-    # add a start and an end node
-    graph.add_node("start", weight=1)
-    graph.add_node("end", weight=1)
+    graph.add_node("start", weight=1, indices={0})
+    graph.add_node("end", weight=1, indices={n_residues - 1})
 
     # add all the groups as nodes
     for i, d in enumerate(domains):
