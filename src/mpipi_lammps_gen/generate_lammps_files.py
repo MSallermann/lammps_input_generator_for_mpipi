@@ -335,6 +335,8 @@ class LammpsData:
     y_lims: list[float]
     z_lims: list[float]
 
+    n_atom_types: int | None = None
+
 
 def initialize_lammps_data() -> LammpsData:
     # mass info
@@ -548,7 +550,10 @@ def generate_lammps_data(
 def write_lammps_data_file(lammps_data: LammpsData) -> str:
     res = "Lammps data file\n\n"
 
-    n_atom_types = 40  # max(int(a.atom_type) for a in lammps_data.atoms)
+    if lammps_data.n_atom_types is None:  # noqa: SIM108
+        n_atom_types = 40  # max(int(a.atom_type) for a in lammps_data.atoms)
+    else:
+        n_atom_types = lammps_data.n_atom_types
 
     res += f"{len(lammps_data.atoms)} atoms\n"
     res += f"{n_atom_types} atom types\n"
@@ -728,6 +733,7 @@ def get_lammps_npt_command(
     lange_damp: float = 1000.0,
     seed: int = 34278,
     tdamp: float = 1000.0,
+    use_berendsen: bool = False,
 ) -> str:
     if dt_ramp_up is None:
         dt_ramp_up = []
@@ -738,7 +744,10 @@ def get_lammps_npt_command(
         res += f"fix fxnverigid{num} {g.name} rigid/nvt molecule temp {temp} {temp} {tdamp}\n"
 
     # barostat only
-    res += f"fix fxbaro nonrigid nph iso {press} {press} {pdamp} dilate all\n"
+    if use_berendsen:
+        res += f"fix fxbaro nonrigid nph iso {press} {press} {pdamp} dilate all\n"
+    else:
+        res += f"fix fxbaro nonrigid press/berendsen iso {press} {press} {pdamp} dilate all\n"
 
     # langevin thermostat
     res += f"fix fxlange nonrigid langevin {temp} {temp} {lange_damp} {seed}\n"
