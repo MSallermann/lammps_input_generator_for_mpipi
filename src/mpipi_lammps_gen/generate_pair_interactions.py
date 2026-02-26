@@ -86,6 +86,44 @@ def generate_wf_interactions(
     return interactions
 
 
+def rescale_wf_interactions(
+    idr_glob_rescaling: float,
+    glob_glob_rescaling: float,
+    idr_idr_rescaling: float = 1.0,
+    n_res: int = 20,
+) -> PairDict:
+    interactions = PairDict()
+
+    # There are n_res residues, which means we have to iterate up to 2*n_res, to have a variatn of each residue which is also in a globular domain
+    for i in range(2 * n_res):
+        for j in range(i, 2 * n_res):
+            # Check if i and j are in an intrinsically disoredered region (IDR)
+            i_is_in_idr = i <= n_res
+            j_is_in_idr = j <= n_res
+
+            # Look up the default WF parameters for this interaction
+            wf_def = __default_interactions__[(i, j)]
+
+            # Scale the epsilon based on IDR-IDR (1.0), IDR-GLOB, GLOB-GLOB prefactors
+            if i_is_in_idr and j_is_in_idr:
+                epsilon_new = idr_idr_rescaling * wf_def.epsilon
+            elif i_is_in_idr or j_is_in_idr:
+                epsilon_new = idr_glob_rescaling * wf_def.epsilon
+            else:
+                epsilon_new = glob_glob_rescaling * wf_def.epsilon
+
+            # put the new interaction
+            interactions[(i, j)] = WFInteraction(
+                epsilon=epsilon_new,
+                sigma=wf_def.sigma,
+                mu=wf_def.mu,
+                nu=wf_def.nu,
+                rc=wf_def.rc,
+            )
+
+    return interactions
+
+
 def get_wf_pairs_str(interactions: PairDict) -> str:
     res = ""
 
