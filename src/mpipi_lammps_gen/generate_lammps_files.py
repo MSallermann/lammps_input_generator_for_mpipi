@@ -58,6 +58,7 @@ __three_to_one__ = {
     "ASN": "N",
     "GLN": "Q",
 }
+__three_to_one__.update({k + "_GLOB": v + "_GLOB" for k, v in __three_to_one__.items()})
 
 __one_to_three__ = {v: k for k, v in __three_to_one__.items()}
 

@@ -4,6 +4,8 @@ from typing import Any
 
 import polars as pl
 
+from mpipi_lammps_gen.generate_lammps_files import __three_to_one__, type_to_name
+
 
 @dataclass
 class WFInteraction:
@@ -131,6 +133,13 @@ def get_wf_pairs_str(interactions: PairDict) -> str:
 
     for k, v in interactions.items():
         i, j = k
+
+        name_i = type_to_name[i + 1]
+        name_j = type_to_name[j + 1]
+        name_i_single = __three_to_one__[name_i]
+        name_j_single = __three_to_one__[name_j]
+
+        res += f"\n# {name_i}/{name_i_single} <--> {name_j}/{name_j_single}\n"
         res += base.format(i=i + 1, j=j + 1, **asdict(v))
 
     return res
