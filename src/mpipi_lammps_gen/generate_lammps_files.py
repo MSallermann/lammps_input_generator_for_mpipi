@@ -684,6 +684,7 @@ def get_lammps_nvt_command(
     timestep: float,
     temp: float,
     n_time_steps: int,
+    temp_end: float | None = None,
     dt_ramp_up: list[float] | None = None,
     lange_damp: float = 1000.0,
     tdamp: float = 1000.0,
@@ -693,13 +694,16 @@ def get_lammps_nvt_command(
     if dt_ramp_up is None:
         dt_ramp_up = []
 
+    if temp_end is None:
+        temp_end = temp
+
     res = "# Running NVT ... \n"
 
     for num, g in enumerate(lammps_data.groups):
-        res += f"fix fxnverigid{num} {g.name} rigid/nvt molecule temp {temp} {temp} {tdamp}\n"
+        res += f"fix fxnverigid{num} {g.name} rigid/nvt molecule temp {temp} {temp_end} {tdamp}\n"
 
     res += "fix fxnve nonrigid nve\n"
-    res += f"fix fxlange nonrigid langevin {temp} {temp} {lange_damp} {seed}\n"
+    res += f"fix fxlange nonrigid langevin {temp} {temp_end} {lange_damp} {seed}\n"
 
     for i, dt in enumerate(dt_ramp_up):
         res += f"# ... ramping up time step from {dt_ramp_up[0]:.3f} to {dt_ramp_up[-1]:.3f}. Stage {i + 1} / {len(dt_ramp_up)}\n"
@@ -728,6 +732,8 @@ def get_lammps_npt_command(
     temp: float,
     press: float,
     n_time_steps: int,
+    temp_end: float | None = None,
+    press_end: float | None = None,
     dt_ramp_up: list[float] | None = None,
     steps_per_stage: int = 10000,
     pdamp: float = 1000.0,
@@ -739,19 +745,25 @@ def get_lammps_npt_command(
     if dt_ramp_up is None:
         dt_ramp_up = []
 
+    if temp_end is None:
+        temp_end = temp
+
+    if press_end is None:
+        press_end = press
+
     res = "# Running NPT ... \n"
 
     for num, g in enumerate(lammps_data.groups):
-        res += f"fix fxnverigid{num} {g.name} rigid/nvt molecule temp {temp} {temp} {tdamp}\n"
+        res += f"fix fxnverigid{num} {g.name} rigid/nvt molecule temp {temp} {temp_end} {tdamp}\n"
 
     # barostat only
     if use_berendsen:
-        res += f"fix fxbaro nonrigid press/berendsen iso {press} {press} {pdamp} dilate all\n"
+        res += f"fix fxbaro nonrigid press/berendsen iso {press} {press_end} {pdamp} dilate all\n"
     else:
-        res += f"fix fxbaro nonrigid nph iso {press} {press} {pdamp} dilate all\n"
+        res += f"fix fxbaro nonrigid nph iso {press} {press_end} {pdamp} dilate all\n"
 
     # langevin thermostat
-    res += f"fix fxlange nonrigid langevin {temp} {temp} {lange_damp} {seed}\n"
+    res += f"fix fxlange nonrigid langevin {temp} {temp_end} {lange_damp} {seed}\n"
 
     for i, dt in enumerate(dt_ramp_up):
         res += f"# ... ramping up time step from {dt_ramp_up[0]:.3f} to {dt_ramp_up[-1]:.3f}. Stage {i + 1} / {len(dt_ramp_up)}\n"
@@ -780,6 +792,8 @@ def get_lammps_npt_command_rigid(
     temp: float,
     press: float,
     n_time_steps: int,
+    temp_end: float | None = None,
+    press_end: float | None = None,
     dt_ramp_up: list[float] | None = None,
     steps_per_stage: int = 10000,
     lange_damp: float = 1000.0,
@@ -790,12 +804,18 @@ def get_lammps_npt_command_rigid(
     if dt_ramp_up is None:
         dt_ramp_up = []
 
+    if temp_end is None:
+        temp_end = temp
+
+    if press_end is None:
+        press_end = press
+
     res = "# Running NPT ... \n"
 
-    res += f"fix fxnptrigid rigid rigid/npt molecule temp {temp} {temp} {tdamp} iso {press} {press} {pdamp} dilate all\n"
+    res += f"fix fxnptrigid rigid rigid/npt molecule temp {temp} {temp_end} {tdamp} iso {press} {press_end} {pdamp} dilate all\n"
 
     # langevin thermostat
-    res += f"fix fxlange nonrigid langevin {temp} {temp} {lange_damp} {seed}\n"
+    res += f"fix fxlange nonrigid langevin {temp} {temp_end} {lange_damp} {seed}\n"
 
     for i, dt in enumerate(dt_ramp_up):
         res += f"# ... ramping up time step from {dt_ramp_up[0]:.3f} to {dt_ramp_up[-1]:.3f}. Stage {i + 1} / {len(dt_ramp_up)}\n"
