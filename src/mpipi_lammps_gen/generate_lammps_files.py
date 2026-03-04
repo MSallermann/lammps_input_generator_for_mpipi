@@ -758,6 +758,7 @@ def get_lammps_npt_command(
 
     # barostat only
     if use_berendsen:
+        res += "fix fxnve nonrigid nve\n"  # For berendsen, we need a separate time integration
         res += f"fix fxbaro nonrigid press/berendsen iso {press} {press_end} {pdamp} dilate all\n"
     else:
         res += f"fix fxbaro nonrigid nph iso {press} {press_end} {pdamp} dilate all\n"
@@ -779,6 +780,9 @@ def get_lammps_npt_command(
     # unfix
     for num, _ in enumerate(lammps_data.groups):
         res += f"unfix fxnverigid{num}\n"
+
+    if use_berendsen:
+        res += "unfix fxnve\n"
 
     res += "unfix fxbaro\n"
     res += "unfix fxlange\n"
