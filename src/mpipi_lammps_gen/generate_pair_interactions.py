@@ -139,7 +139,7 @@ def get_wf_pairs_str(interactions: PairDict) -> str:
         name_i_single = __three_to_one__[name_i]
         name_j_single = __three_to_one__[name_j]
 
-        res += f"\n# {name_i}/{name_i_single} <--> {name_j}/{name_j_single}\n"
+        res += f"\n# {name_i}/{name_i_single} to {name_j}/{name_j_single}\n"
         res += base.format(i=i + 1, j=j + 1, **asdict(v))
 
     return res
