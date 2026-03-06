@@ -370,6 +370,7 @@ def add_proteins_to_lammps_data(
     n_proteins_x: int = 1,
     n_proteins_y: int = 1,
     n_proteins_z: int = 1,
+    n_proteins_max: int | None = None,
     grid_buffer: float = 0.0,
     box_buffer: float = 0.0,
     offset_x: float = 0.0,
@@ -390,15 +391,20 @@ def add_proteins_to_lammps_data(
     residue_positions = prot_data.get_residue_positions()
     assert residue_positions is not None
 
-    n_proteins_total = n_proteins_x * n_proteins_y * n_proteins_z
-
     protein_positions = place_proteins_in_grid(
         residue_positions=residue_positions,
         n_proteins_x=n_proteins_x,
         n_proteins_y=n_proteins_y,
         n_proteins_z=n_proteins_z,
         grid_buffer=grid_buffer,
+        n_proteins_max=n_proteins_max,
     )
+
+    n_proteins_total = n_proteins_x * n_proteins_y * n_proteins_z
+    if n_proteins_max is not None:
+        n_proteins_total = min(
+            n_proteins_max, n_proteins_x * n_proteins_y * n_proteins_z
+        )
 
     protein_positions_arr = np.ravel(np.array(protein_positions))
     protein_positions_arr = protein_positions_arr.reshape(
