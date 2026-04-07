@@ -417,7 +417,10 @@ def get_path_properties(  # noqa: PLR0912, PLR0915
     is_loop1 = False
     if n1 is None:
         e1 = _find_edge_of_residue(graph, i1)
-        assert e1 is not None
+
+        if e1 is None:
+            msg = f"Could not find an edge or a node to which residue {i1} belongs"
+            raise Exception(msg)
 
         # we have to make sure that we get the source and target of
         # the edge in the same order they occur in the protein
@@ -442,7 +445,10 @@ def get_path_properties(  # noqa: PLR0912, PLR0915
     is_loop2 = False
     if n2 is None:
         e2 = _find_edge_of_residue(graph, i2)
-        assert e2 is not None
+
+        if e2 is None:
+            msg = f"Could not find an edge or a node to which residue {i2} belongs"
+            raise Exception(msg)
 
         # we have to make sure that we get the source and target of
         # the edge in the same order they occur in the protein
@@ -473,7 +479,10 @@ def get_path_properties(  # noqa: PLR0912, PLR0915
         n1 is not None
     ):  # ... this means the starting residue lies within a globular domain
         # we have to add the distance from the starting residue to the point at which it leaves the domain
-        idx1, idx2 = _find_connected_indices(graph, path[0], path[1])
+        if len(path) > 1:
+            idx1, idx2 = _find_connected_indices(graph, path[0], path[1])
+        else:
+            idx1 = i2
         dist = np.linalg.norm(residue_positions[i1] - residue_positions[idx1])
         if dist > 0.0:
             fixed_distances.append(float(dist))
@@ -490,7 +499,9 @@ def get_path_properties(  # noqa: PLR0912, PLR0915
         fixed_distances.append(float(min(dist1, dist2)))
 
     # Handle the end point
-    if n2 is not None:  # ... this means the end residue lies within a globular domain
+    if (
+        n2 is not None and len(path) > 1
+    ):  # ... this means the end residue lies within a globular domain
         # we have to add the distance from the end residue to the point at which the last domain was entered
         idx1, idx2 = _find_connected_indices(graph, path[-1], path[-2])
         dist = np.linalg.norm(residue_positions[i2] - residue_positions[idx1])
