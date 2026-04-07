@@ -421,13 +421,19 @@ def _find_connected_indices(graph: nx.Graph, n1: str, n2: str) -> tuple[int, int
 
 @dataclass
 class PathProperties:
-    """The properties of a path connecting two residued in a 'ProteinTopology' graph."""
+    """The properties of a path connecting two residues in a 'ProteinTopology' graph."""
 
-    path: list[str]
-    n_random_segments: int
+    path: list[str]  # The path of nodes
+    n_random_segments: int  # The number of random segments
     n_random_segments_offset: int
+
+    # List of fixed distances. These correspond to "shortcuts" through globular domains
     fixed_distances: list[float]
+
+    # A list of loop tuples. The first index is the index in the loop and the last index is the length of the loop ().
+    # A path generally may start and/or end in a looped segment
     loops: list[tuple[int, int]]
+
     n1: str | None
     n2: str | None
     e1: tuple[str, str] | None
