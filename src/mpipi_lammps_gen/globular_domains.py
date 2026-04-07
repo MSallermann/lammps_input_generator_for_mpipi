@@ -12,6 +12,8 @@ if TYPE_CHECKING:
 
 @dataclass
 class GlobularDomain:
+    """Represents a globular domain in a protein."""
+
     indices: list[tuple[int, int]]
 
     def start_idx(self) -> int:
@@ -260,63 +262,115 @@ def shortest_path_matrix(
 def protein_topology(
     n_residues: int,
     domains: Sequence[GlobularDomain],
-) -> nx.Graph:
-    graph = nx.Graph()
+) -> nx.MultiGraph:
+    """
+    Generate an undirected NetworkX MultiGraph representing protein topology.
 
-    # add a start and an end node
+    In this representation:
+        - Nodes correspond to globular (rigid) domains and terminal points.
+        - Edges correspond to contiguous stretches of disordered residues (IDRs)
+        between rigid regions and/or termini.
+
+    Nodes:
+        - Two special nodes are always present:
+            - "start": represents the N-terminus (residue index 0)
+            - "end": represents the C-terminus (residue index n_residues - 1)
+        - Each globular domain is added as a node named "CD{i}", where i is the
+        index in the input sequence (0-based).
+        - Node attributes:
+            - "weight": number of atoms in the domain (or 1 for start/end)
+            - "indices": set of residue indices belonging to that node
+
+    Edges:
+        - The graph is a MultiGraph: multiple edges between the same pair of nodes
+        and self-loops are allowed.
+        - Each edge represents one contiguous disordered segment (IDR).
+        - Edges are created:
+            - when entering a globular domain from a disordered region, and
+            - at the end of the sequence (connecting the last anchor to "end").
+        - No edge is created if two nodes are adjacent with no disordered residues
+        between them (i.e., zero-length segments are skipped).
+
+        - Edge attributes:
+            - "start_idx": first residue index in the disordered segment
+            - "end_idx": last residue index in the disordered segment (inclusive)
+            - "length": number of residues in the segment, i.e.
+            (end_idx - start_idx + 1)
+            - "weight": defined as 1.0 / length
+            - "loop": True if the edge connects a node to itself
+
+    Important notes:
+        - Overlapping domains are not allowed; a ValueError is raised if a residue
+        belongs to more than one domain.
+        - If a domain starts at residue 0, no edge is created between "start" and
+        that domain.
+        - If a domain ends at residue n_residues - 1, no edge is created between
+        that domain and "end".
+
+    Returns:
+        nx.MultiGraph: Graph encoding the protein topology.
+    """
+
+    graph = nx.MultiGraph()
+
     graph.add_node("start", weight=1, indices={0})
     graph.add_node("end", weight=1, indices={n_residues - 1})
 
-    # add all the groups as nodes
     for i, d in enumerate(domains):
         graph.add_node(f"CD{i}", weight=d.n_atoms(), indices=set(d.get_all_indices()))
 
-    def get_grp_idx(idx_residue: int) -> int | None:
-        for i, d in enumerate(domains):
-            if d.is_in_rigid_region(idx_residue):
-                return i
+    residue_to_domain: list[int | None] = [None] * n_residues
+    for i, d in enumerate(domains):
+        for idx in d.get_all_indices():
+            if residue_to_domain[idx] is not None:
+                msg = (
+                    f"Residue {idx} belongs to multiple domains: "
+                    f"{residue_to_domain[idx]} and {i}"
+                )
+                raise ValueError(msg)
+            residue_to_domain[idx] = i
 
-        return None
-
-    # starting node of the current edge
     edge_start = "start"
     edge_start_idx = 0
-
     grp_idx_prev_res = None
 
-    last_proper_group = "start"
-
     for i_res in range(n_residues):
-        this_grp_idx = get_grp_idx(i_res)
+        this_grp_idx = residue_to_domain[i_res]
 
         if this_grp_idx is not None and this_grp_idx != grp_idx_prev_res:
-            # we end the current edge
-            graph.add_edge(
-                edge_start,
-                f"CD{this_grp_idx}",
-                length=i_res - edge_start_idx,
-                weight=1.0 / (i_res - edge_start_idx + 1),
-                start_idx=edge_start_idx,
-                end_idx=i_res,
-                loop=(edge_start == f"CD{this_grp_idx}"),
-            )
-            last_proper_group = f"CD{this_grp_idx}"
-        elif (
-            this_grp_idx is None and grp_idx_prev_res is not None
-        ):  # leaving a group, start counting for an edge again
+            end_idx = i_res - 1  # previous residue was the last disordered one
+
+            if end_idx >= edge_start_idx:
+                segment_length = end_idx - edge_start_idx + 1
+                graph.add_edge(
+                    edge_start,
+                    f"CD{this_grp_idx}",
+                    length=segment_length,
+                    weight=1.0 / segment_length,
+                    start_idx=edge_start_idx,
+                    end_idx=end_idx,
+                    loop=(edge_start == f"CD{this_grp_idx}"),
+                )
+
+        elif this_grp_idx is None and grp_idx_prev_res is not None:
             edge_start = f"CD{grp_idx_prev_res}"
-            edge_start_idx = i_res - 1
+            edge_start_idx = i_res  # first disordered residue
 
         grp_idx_prev_res = this_grp_idx
 
-    graph.add_edge(
-        last_proper_group,
-        "end",
-        length=n_residues - 1 - edge_start_idx,
-        start_idx=edge_start_idx,
-        end_idx=n_residues - 1,
-        loop=False,
-    )
+    end_idx = n_residues - 1
+    if end_idx >= edge_start_idx and grp_idx_prev_res is None:
+        end_idx = n_residues - 1
+        final_length = end_idx - edge_start_idx + 1
+        graph.add_edge(
+            edge_start,
+            "end",
+            length=final_length,
+            weight=1.0 / final_length,
+            start_idx=edge_start_idx,
+            end_idx=end_idx,
+            loop=False,
+        )
 
     return graph
 
@@ -367,6 +421,8 @@ def _find_connected_indices(graph: nx.Graph, n1: str, n2: str) -> tuple[int, int
 
 @dataclass
 class PathProperties:
+    """The properties of a path connecting two residued in a 'ProteinTopology' graph."""
+
     path: list[str]
     n_random_segments: int
     n_random_segments_offset: int
