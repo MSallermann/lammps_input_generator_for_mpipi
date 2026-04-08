@@ -104,6 +104,12 @@ def build_shortest_path_graph(
     If `segment_length` is provided, all distances are divided by it, so the
     resulting weights are expressed in effective random-walk segment counts.
     Otherwise, weights are expressed in distance units.
+
+    NOTE:
+        We explicitly connect all anchors within a domain (complete graph).
+        This is redundant under Euclidean distances (triangle inequality),
+        but keeps the model simple and allows use of standard NetworkX
+        shortest path algorithms without custom logic.
     """
     pos = np.asarray(residue_positions, dtype=float)
     if pos.ndim != 2 or pos.shape[1] != 3:
@@ -338,6 +344,7 @@ def get_path_properties(  # noqa: PLR0912, PLR0915
     i2: int,
     residue_positions: list[tuple[float, float, float]],
     *,
+    shortest_path_graph: nx.MultiGraph | None = None,
     bond_length: float,
     segment_length: float | None = None,
 ) -> PathProperties:
@@ -376,12 +383,15 @@ def get_path_properties(  # noqa: PLR0912, PLR0915
         msg = "segment_length must be positive if provided"
         raise ValueError(msg)
 
-    sp_graph = build_shortest_path_graph(
-        topology,
-        pos,
-        bond_length=bond_length,
-        segment_length=segment_length,
-    )
+    if shortest_path_graph is None:
+        sp_graph = build_shortest_path_graph(
+            topology,
+            pos,
+            bond_length=bond_length,
+            segment_length=segment_length,
+        )
+    else:
+        sp_graph = shortest_path_graph
 
     n1 = _find_node_of_residue(topology, i1)
     n2 = _find_node_of_residue(topology, i2)
