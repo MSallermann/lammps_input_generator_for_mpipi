@@ -212,7 +212,8 @@ class PathProperties:
 
     # Sum of IDR contributions along the chosen path, in the same units as the
     # graph weights (distance units if segment_length is None, otherwise segment count)
-    n_random_segments: float
+    #   ... It can be thought of as the maximum end-to-end length of the IDR segments concatenated
+    random_walk_contour_length: float
 
     # Where the original residues live in the topology graph
     n1: str | None
@@ -222,6 +223,8 @@ class PathProperties:
 
     # Endpoint loop metadata, only populated if the start/end residue lies in a self-loop IDR
     # Tuple format: (idx_within_loop, loop_length)
+    # ... note: the loop length is given in residues, *not* in segments
+    # ... to get the number of segments you have to add one
     start_loop: tuple[int, int] | None
     end_loop: tuple[int, int] | None
 
@@ -329,8 +332,8 @@ def _anchor_candidates_for_residue(
     loop = bool(data["loop"])
 
     # contour distance from residue i to the two anchors along the IDR
-    left_offset = (i - start_idx) * bond_length
-    right_offset = (end_idx - i) * bond_length
+    left_offset = (i - start_idx + 1) * bond_length
+    right_offset = (end_idx - i + 1) * bond_length
 
     loop_meta: tuple[int, int] | None = None
     if loop:
@@ -415,7 +418,7 @@ def get_path_properties(  # noqa: PLR0912, PLR0915
             start_offset=0.0,
             end_offset=0.0,
             fixed_distances=[dist] if dist > 0 else [],
-            n_random_segments=0.0,
+            random_walk_contour_length=0.0,
             n1=n1,
             n2=n2,
             e1=None,
@@ -450,7 +453,7 @@ def get_path_properties(  # noqa: PLR0912, PLR0915
             start_offset=0.0,
             end_offset=0.0,
             fixed_distances=[],
-            n_random_segments=weight,
+            random_walk_contour_length=weight,
             n1=None,
             n2=None,
             e1=e1,
@@ -514,13 +517,13 @@ def get_path_properties(  # noqa: PLR0912, PLR0915
     ]
 
     fixed_distances: list[float] = []
-    n_random_segments = 0.0
+    random_walk_contour_length = 0.0
 
     for u, v, k in edge_path:
         data = sp_graph.edges[u, v, k]
         if data["kind"] == "idr":
             # expressed in the same units as the shortest-path graph weight
-            n_random_segments += float(data["weight"])
+            random_walk_contour_length += float(data["weight"])
         elif data["kind"] == "domain_shortcut":
             # keep the physical shortcut distance, not the normalized weight
             fixed_distances.append(float(data["distance"]))
@@ -535,7 +538,7 @@ def get_path_properties(  # noqa: PLR0912, PLR0915
         start_offset=float(best["start_offset"]),
         end_offset=float(best["end_offset"]),
         fixed_distances=fixed_distances,
-        n_random_segments=float(n_random_segments),
+        random_walk_contour_length=float(random_walk_contour_length),
         n1=best["n1"],
         n2=best["n2"],
         e1=best["e1"],
