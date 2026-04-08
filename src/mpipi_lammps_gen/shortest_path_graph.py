@@ -182,6 +182,10 @@ def build_shortest_path_graph(
                     idx2=idx2,
                 )
 
+    path_graph.graph["bond_length"] = bond_length
+    path_graph.graph["segment_length"] = segment_length
+    path_graph.graph["n_residues"] = len(pos)
+
     return path_graph
 
 
@@ -391,6 +395,9 @@ def get_path_properties(  # noqa: PLR0912, PLR0915
             segment_length=segment_length,
         )
     else:
+        assert shortest_path_graph.graph["bond_length"] == bond_length
+        assert shortest_path_graph.graph["segment_length"] == segment_length
+        assert shortest_path_graph.graph["n_residues"] == len(pos)
         sp_graph = shortest_path_graph
 
     n1 = _find_node_of_residue(topology, i1)
