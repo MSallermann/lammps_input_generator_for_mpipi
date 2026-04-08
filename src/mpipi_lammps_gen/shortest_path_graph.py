@@ -570,19 +570,55 @@ def get_path_properties(  # noqa: PLR0912, PLR0915
     for u, v, k in edge_path:
         data = sp_graph.edges[u, v, k]
         if data["kind"] == "idr":
+            # expressed in the same units as the shortest-path graph weight
             random_walk_contour_length += float(data["weight"])
         elif data["kind"] == "domain_shortcut":
+            # keep the physical shortcut distance, not the normalized weight
             fixed_distances.append(float(data["distance"]))
         else:
             msg = f"Unknown shortest-path graph edge kind: {data['kind']!r}"
             raise ValueError(msg)
 
+    start_offset = float(best["start_offset"])
+    end_offset = float(best["end_offset"])
+
+    # Absorb endpoint offsets into the physical decomposition.
+    #
+    # - If the endpoint lies in an ordinary IDR edge, the offset is contour length
+    #   and should contribute to random_walk_contour_length.
+    # - If the endpoint lies in a rigid node, the offset is a rigid shortcut
+    #   and should contribute to fixed_distances.
+    # - If the endpoint lies in a loop edge, keep the offset separate because
+    #   the loop contribution is handled specially via start_loop / end_loop.
+
+    if best["e1"] is not None and best["start_loop"] is None:
+        random_walk_contour_length += start_offset
+        start_offset = 0.0
+    elif (
+        best["n1"] is not None
+        and best["n1"] not in {"start", "end"}
+        and start_offset > 0.0
+    ):
+        fixed_distances.append(start_offset)
+        start_offset = 0.0
+
+    if best["e2"] is not None and best["end_loop"] is None:
+        random_walk_contour_length += end_offset
+        end_offset = 0.0
+    elif (
+        best["n2"] is not None
+        and best["n2"] not in {"start", "end"}
+        and end_offset > 0.0
+    ):
+        fixed_distances.append(end_offset)
+        end_offset = 0.0
+
     return PathProperties(
         path=node_path,
         edge_path=edge_path,
         total_weight=float(best["total"]),
-        start_offset=float(best["start_offset"]),
-        end_offset=float(best["end_offset"]),
+        start_offset=start_offset,
+        end_offset=end_offset,
         fixed_distances=fixed_distances,
         random_walk_contour_length=float(random_walk_contour_length),
         n1=best["n1"],

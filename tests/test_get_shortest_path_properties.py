@@ -396,6 +396,79 @@ def test_segment_length_normalizes_total_weight_and_idr_contribution():
     assert props.fixed_distances == pytest.approx([2.0 * bond_length])
 
 
+def test_endpoint_idr_offset_is_absorbed_into_random_walk_contour_length():
+    # residues:
+    #
+    # 0 ─► 1 ─► [2 ─► 3 ─► 4] ─► 5 ─► 6
+    #            rigid domain CD0
+    #
+    # path from 0 to 5 should be:
+    #
+    #   0 -> 1 -> 2        (IDR: 2 bonds)
+    #   2 -> 4             (rigid shortcut)
+    #   4 -> 5             (IDR: 1 bond)
+    #
+    # so physically:
+    #   random_walk_contour_length = 3 * bond_length
+    #   fixed_distances            = [distance(2,4)] = [2 * bond_length]
+    #   start_offset               = 0
+    #   end_offset                 = 0
+    #   total_weight               = 5 * bond_length
+    #
+    # This case forces the anchor-graph branch:
+    #   - residue 0 is the start anchor
+    #   - residue 5 lies inside the right-hand IDR
+    #
+    # If endpoint offsets are not absorbed into the physical decomposition,
+    # the implementation will typically return:
+    #   random_walk_contour_length = 2 * bond_length
+    #   end_offset                 = 1 * bond_length
+    #
+    # which is the bug we want to catch.
+
+    d0 = GlobularDomain(indices=[(2, 4)])
+    topology = protein_topology(
+        n_residues=7,
+        domains=[d0],
+    )
+
+    bond_length = 0.5
+
+    positions = [(float(i) * bond_length, 0.0, 0.0) for i in range(7)]
+
+    props = get_path_properties(
+        topology,
+        i1=0,
+        i2=5,  # inside the right-hand IDR adjacent to CD0
+        residue_positions=positions,
+        bond_length=bond_length,
+    )
+
+    # the path should go from the start anchor, through the left domain anchor,
+    # through the right domain anchor, and then terminate at residue 5 via the
+    # same contour segment that connects 4 -> 5 -> 6
+    assert props.path == [
+        ("start", 0),
+        ("CD0", 2),
+        ("CD0", 4),
+    ]
+
+    # physically, the contour length should include both IDR pieces:
+    #   0 -> 1 -> 2   and   4 -> 5
+    assert props.random_walk_contour_length == pytest.approx(3.0 * bond_length)
+
+    # the rigid shortcut is 2 -> 4
+    assert props.fixed_distances == pytest.approx([2.0 * bond_length])
+
+    # once the endpoint contour segment has been absorbed into the decomposition,
+    # there should be no leftover endpoint bookkeeping
+    assert props.start_offset == pytest.approx(0.0)
+    assert props.end_offset == pytest.approx(0.0)
+
+    # total = 3*b + 2*b = 5*b
+    assert props.total_weight == pytest.approx(5.0 * bond_length)
+
+
 def test_negative_residue_index_raises():
     topology = protein_topology(
         n_residues=5,
