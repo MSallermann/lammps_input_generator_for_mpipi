@@ -345,6 +345,48 @@ def _anchor_candidates_for_residue(
     ]
 
 
+def _find_contour_edge_of_residue(
+    graph: nx.MultiGraph,
+    i: int,
+) -> TopologyEdgeRef | None:
+    """
+    Return the topology edge corresponding to the physical contour segment
+    containing residue i.
+
+    This behaves like `_find_edge_of_residue`, but terminal residues are also
+    considered part of the adjacent terminal IDR edge when appropriate.
+
+    So:
+      - interior IDR residues map to their IDR edge
+      - residue 0 can map to a "start"-adjacent edge if that edge starts at 0
+      - residue N-1 can map to an "end"-adjacent edge if that edge ends at N-1
+    """
+    edge = _find_edge_of_residue(graph, i)
+    if edge is not None:
+        return edge
+
+    node = _find_node_of_residue(graph, i)
+    if node not in {"start", "end"}:
+        return None
+
+    matches: list[TopologyEdgeRef] = []
+
+    for u, v, k, data in graph.edges(keys=True, data=True):
+        if (node == "start" and node in (u, v) and int(data["start_idx"]) == i) or (
+            node == "end" and node in (u, v) and int(data["end_idx"]) == i
+        ):
+            matches.append((u, v, k))
+
+    if len(matches) > 1:
+        msg = f"Residue {i} matches multiple terminal contour edges: {matches}"
+        raise ValueError(msg)
+
+    if len(matches) == 1:
+        return matches[0]
+
+    return None
+
+
 def get_path_properties(  # noqa: PLR0912, PLR0915
     topology: nx.MultiGraph,
     i1: int,
@@ -406,8 +448,12 @@ def get_path_properties(  # noqa: PLR0912, PLR0915
     n1 = _find_node_of_residue(topology, i1)
     n2 = _find_node_of_residue(topology, i2)
 
+    contour_e1 = _find_contour_edge_of_residue(topology, i1)
+    contour_e2 = _find_contour_edge_of_residue(topology, i2)
+
     # Case 1: same rigid domain
-    if n1 is not None and n1 == n2:
+    # start/end are bookkeeping nodes, not rigid domains
+    if n1 is not None and n1 == n2 and n1 not in {"start", "end"}:
         dist = float(np.linalg.norm(pos[i2] - pos[i1]))
         weight = dist if segment_length is None else dist / segment_length
 
@@ -427,12 +473,10 @@ def get_path_properties(  # noqa: PLR0912, PLR0915
             end_loop=None,
         )
 
-    # Case 2: same IDR
-    e1 = None if n1 is not None else _find_edge_of_residue(topology, i1)
-    e2 = None if n2 is not None else _find_edge_of_residue(topology, i2)
-
-    if e1 is not None and e1 == e2:
-        u, v, k = e1
+    # Case 2: same contour edge
+    # This includes terminal residues when they lie on the adjacent terminal IDR.
+    if contour_e1 is not None and contour_e1 == contour_e2:
+        u, v, k = contour_e1
         edge_data = topology.edges[u, v, k]
 
         dist = abs(i2 - i1) * bond_length
@@ -454,13 +498,17 @@ def get_path_properties(  # noqa: PLR0912, PLR0915
             end_offset=0.0,
             fixed_distances=[],
             random_walk_contour_length=weight,
-            n1=None,
-            n2=None,
-            e1=e1,
-            e2=e2,
+            n1=n1,
+            n2=n2,
+            e1=contour_e1,
+            e2=contour_e2,
             start_loop=start_loop,
             end_loop=end_loop,
         )
+
+    # For the remaining cases, use the original node/edge classification
+    e1 = None if n1 is not None else _find_edge_of_residue(topology, i1)
+    e2 = None if n2 is not None else _find_edge_of_residue(topology, i2)
 
     start_candidates = _anchor_candidates_for_residue(
         topology,
@@ -522,10 +570,8 @@ def get_path_properties(  # noqa: PLR0912, PLR0915
     for u, v, k in edge_path:
         data = sp_graph.edges[u, v, k]
         if data["kind"] == "idr":
-            # expressed in the same units as the shortest-path graph weight
             random_walk_contour_length += float(data["weight"])
         elif data["kind"] == "domain_shortcut":
-            # keep the physical shortcut distance, not the normalized weight
             fixed_distances.append(float(data["distance"]))
         else:
             msg = f"Unknown shortest-path graph edge kind: {data['kind']!r}"
