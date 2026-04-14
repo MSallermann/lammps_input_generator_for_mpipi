@@ -230,9 +230,20 @@ class PathProperties:
 
 
 def _find_node_of_residue(graph: nx.MultiGraph, i: int) -> str | None:
+    # First prefer real rigid-domain nodes over bookkeeping terminal nodes
     for n, data in graph.nodes(data=True):
+        if n in {"start", "end"}:
+            continue
         if "indices" in data and i in data["indices"]:
             return n
+
+    # Only fall back to start/end if no rigid domain contains the residue
+    for n, data in graph.nodes(data=True):
+        if n not in {"start", "end"}:
+            continue
+        if "indices" in data and i in data["indices"]:
+            return n
+
     return None
 
 

@@ -469,6 +469,101 @@ def test_endpoint_idr_offset_is_absorbed_into_random_walk_contour_length():
     assert props.total_weight == pytest.approx(5.0 * bond_length)
 
 
+def test_last_residue_in_rigid_domain_does_not_get_misclassified_as_end():
+    # residues:
+    #
+    # 0 ─► 1 ─► 2 ─► [3 ─► 4 ─► 5]
+    #                  rigid domain CD0
+    #
+    # residue 5 is both:
+    #   - the terminal residue of the protein
+    #   - part of the rigid domain CD0
+    #
+    # physically, it should be treated as belonging to CD0, not as a bare "end" node.
+    #
+    # with the current bug, get_path_properties(...) may classify residue 5 as "end",
+    # then fail because no "end" anchor exists in the shortest-path graph.
+
+    d0 = GlobularDomain(indices=[(3, 5)])
+    topology = protein_topology(
+        n_residues=6,
+        domains=[d0],
+    )
+
+    bond_length = 0.5
+    positions = [(float(i) * bond_length, 0.0, 0.0) for i in range(6)]
+
+    props = get_path_properties(
+        topology,
+        i1=0,
+        i2=5,
+        residue_positions=positions,
+        bond_length=bond_length,
+    )
+
+    # the last residue lies inside the rigid domain CD0
+    assert props.n2 == "CD0"
+    assert props.e2 is None
+
+    # path from 0 to 5 is:
+    #   0 -> 1 -> 2 -> 3   (IDR: 3 bonds)
+    #   3 -> 5             (rigid shortcut)
+    #
+    # so:
+    #   random_walk_contour_length = 3 * bond_length
+    #   fixed_distances            = [distance(3,5)] = [2 * bond_length]
+    #   end_offset                 = 0
+    assert props.random_walk_contour_length == pytest.approx(3.0 * bond_length)
+    assert props.fixed_distances == pytest.approx([2.0 * bond_length])
+    assert props.end_offset == pytest.approx(0.0)
+
+
+def test_first_residue_in_rigid_domain_does_not_get_misclassified_as_start():
+    # residues:
+    #
+    # [0 ─► 1 ─► 2] ─► 3 ─► 4 ─► 5
+    #   rigid domain CD0
+    #
+    # residue 0 is both:
+    #   - the first residue of the protein
+    #   - part of the rigid domain CD0
+    #
+    # physically, it should be treated as belonging to CD0, not as a bare "start" node.
+
+    d0 = GlobularDomain(indices=[(0, 2)])
+    topology = protein_topology(
+        n_residues=6,
+        domains=[d0],
+    )
+
+    bond_length = 0.5
+    positions = [(float(i) * bond_length, 0.0, 0.0) for i in range(6)]
+
+    props = get_path_properties(
+        topology,
+        i1=0,
+        i2=5,
+        residue_positions=positions,
+        bond_length=bond_length,
+    )
+
+    # the first residue lies inside the rigid domain CD0
+    assert props.n1 == "CD0"
+    assert props.e1 is None
+
+    # path from 0 to 5 is:
+    #   0 -> 2             (rigid shortcut)
+    #   2 -> 3 -> 4 -> 5   (IDR: 3 bonds)
+    #
+    # so:
+    #   random_walk_contour_length = 3 * bond_length
+    #   fixed_distances            = [distance(0,2)] = [2 * bond_length]
+    #   start_offset               = 0
+    assert props.random_walk_contour_length == pytest.approx(3.0 * bond_length)
+    assert props.fixed_distances == pytest.approx([2.0 * bond_length])
+    assert props.start_offset == pytest.approx(0.0)
+
+
 def test_negative_residue_index_raises():
     topology = protein_topology(
         n_residues=5,
