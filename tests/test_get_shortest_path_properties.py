@@ -1,8 +1,117 @@
+from collections.abc import Callable, Sequence
+
 import numpy as np
 import pytest
+from networkx import MultiGraph
 
 from mpipi_lammps_gen.globular_domains import GlobularDomain, protein_topology
-from mpipi_lammps_gen.shortest_path_graph import get_path_properties
+from mpipi_lammps_gen.shortest_path_graph import PathProperties, get_path_properties
+from mpipi_lammps_gen.shortest_path_graph_cached import (
+    build_path_query_cache,
+    get_path_properties_cached,
+)
+
+
+def _get_uncached_props(
+    topology: MultiGraph,
+    positions: MultiGraph,
+    *,
+    i1: int,
+    i2: int,
+    bond_length: float,
+    segment_length: float | None = None,
+) -> PathProperties:
+    return get_path_properties(
+        topology,
+        i1=i1,
+        i2=i2,
+        residue_positions=positions,
+        bond_length=bond_length,
+        segment_length=segment_length,
+    )
+
+
+def _get_cached_props(
+    topology: MultiGraph,
+    positions: Sequence[Sequence[float]],
+    *,
+    i1: int,
+    i2: int,
+    bond_length: float,
+    segment_length: float | None = None,
+) -> PathProperties:
+    cache = build_path_query_cache(
+        topology=topology,
+        residue_positions=positions,
+        bond_length=bond_length,
+        segment_length=segment_length,
+    )
+    return get_path_properties_cached(cache, i1, i2)
+
+
+def _assert_path_properties_equal(a: PathProperties, b: PathProperties) -> None:
+    assert a.path == b.path
+    assert a.edge_path == b.edge_path
+    assert a.total_weight == pytest.approx(b.total_weight)
+    assert a.start_offset == pytest.approx(b.start_offset)
+    assert a.end_offset == pytest.approx(b.end_offset)
+    assert a.fixed_distances == pytest.approx(b.fixed_distances)
+    assert a.random_walk_contour_length == pytest.approx(b.random_walk_contour_length)
+    assert a.n1 == b.n1
+    assert a.n2 == b.n2
+    assert a.e1 == b.e1
+    assert a.e2 == b.e2
+    assert a.start_loop == b.start_loop
+    assert a.end_loop == b.end_loop
+
+
+def _get_both_props(
+    topology: MultiGraph,
+    positions: MultiGraph,
+    i1: int,
+    i2: int,
+    bond_length: float,
+    segment_length: float | None = None,
+) -> tuple[PathProperties, PathProperties]:
+    uncached = _get_uncached_props(
+        topology,
+        positions,
+        i1=i1,
+        i2=i2,
+        bond_length=bond_length,
+        segment_length=segment_length,
+    )
+    cached = _get_cached_props(
+        topology,
+        positions,
+        i1=i1,
+        i2=i2,
+        bond_length=bond_length,
+        segment_length=segment_length,
+    )
+    _assert_path_properties_equal(uncached, cached)
+    return uncached, cached
+
+
+def _run_on_both_variants(
+    assertions_fn: Callable,
+    topology: MultiGraph,
+    positions: Sequence[Sequence[float]],
+    i1: int,
+    i2: int,
+    bond_length: float,
+    segment_length: float | None = None,
+) -> None:
+    uncached, cached = _get_both_props(
+        topology,
+        positions,
+        i1,
+        i2,
+        bond_length=bond_length,
+        segment_length=segment_length,
+    )
+    assertions_fn(uncached)
+    assertions_fn(cached)
 
 
 def test_path_between_two_terminal_idr_residues():
@@ -31,32 +140,31 @@ def test_path_between_two_terminal_idr_residues():
     bond_length = 0.5
 
     positions = [(float(i) * bond_length, 0.0, 0.0) for i in range(5)]
+    i1 = 1
+    i2 = 3
 
-    props = get_path_properties(
-        topology,
-        i1=1,
-        i2=3,
-        residue_positions=positions,
-        bond_length=bond_length,
+    def assertions_fn(props: PathProperties):
+        # since both residues lie in the same IDR, this is handled directly
+        # without going through the anchor graph
+        assert props.path == []
+        assert props.edge_path == []
+
+        # no endpoint attachment bookkeeping is needed in this direct case
+        assert props.start_offset == pytest.approx(0.0)
+        assert props.end_offset == pytest.approx(0.0)
+
+        # there are no rigid shortcuts
+        assert props.fixed_distances == []
+
+        # contour distance from 1 to 3 is two bonds
+        assert props.random_walk_contour_length == pytest.approx(2.0 * bond_length)
+
+        # total weight is just that contour distance
+        assert props.total_weight == pytest.approx(2.0 * bond_length)
+
+    _run_on_both_variants(
+        assertions_fn, topology, positions, i1, i2, bond_length=bond_length
     )
-
-    # since both residues lie in the same IDR, this is handled directly
-    # without going through the anchor graph
-    assert props.path == []
-    assert props.edge_path == []
-
-    # no endpoint attachment bookkeeping is needed in this direct case
-    assert props.start_offset == pytest.approx(0.0)
-    assert props.end_offset == pytest.approx(0.0)
-
-    # there are no rigid shortcuts
-    assert props.fixed_distances == []
-
-    # contour distance from 1 to 3 is two bonds
-    assert props.random_walk_contour_length == pytest.approx(2.0 * bond_length)
-
-    # total weight is just that contour distance
-    assert props.total_weight == pytest.approx(2.0 * bond_length)
 
 
 def test_path_from_rigid_domain_to_rigid_domain_uses_domain_shortcut_and_idrs():
@@ -103,51 +211,51 @@ def test_path_from_rigid_domain_to_rigid_domain_uses_domain_shortcut_and_idrs():
         (6.0 * bond_length, 0.0, 0.0),  # 6
     ]
 
-    props = get_path_properties(
-        topology,
-        i1=0,
-        i2=6,
-        residue_positions=positions,
-        bond_length=bond_length,
+    i1 = 0
+    i2 = 6
+
+    def assertions_fn(props: PathProperties):
+        # the anchor-graph path goes from the start anchor, through the two domain anchors,
+        # to the end anchor
+        assert props.path == [
+            ("start", 0),
+            ("CD0", 2),
+            ("CD0", 4),
+            ("end", 6),
+        ]
+
+        # this path consists of:
+        #   start -> CD0(2)   : IDR
+        #   CD0(2) -> CD0(4)  : rigid shortcut
+        #   CD0(4) -> end     : IDR
+        assert len(props.edge_path) == 3
+
+        # start and end residues are already anchors
+        assert props.start_offset == pytest.approx(0.0)
+        assert props.end_offset == pytest.approx(0.0)
+
+        # IDRs: 0 -> 2 and 4 -> 6, each contributes 2 * bond_length
+        assert props.random_walk_contour_length == pytest.approx(4.0 * bond_length)
+
+        # rigid shortcut inside the domain: residue 2 -> residue 4
+        assert props.fixed_distances == pytest.approx([2.0 * bond_length])
+
+        # total weight = 2*bond_length + 2*bond_length + 2*bond_length
+        assert props.total_weight == pytest.approx(6.0 * bond_length)
+
+        # both endpoints lie in topology nodes, not topology edges
+        assert props.n1 == "start"
+        assert props.n2 == "end"
+        assert props.e1 is None
+        assert props.e2 is None
+
+        # neither endpoint lies in a loop
+        assert props.start_loop is None
+        assert props.end_loop is None
+
+    _run_on_both_variants(
+        assertions_fn, topology, positions, i1, i2, bond_length=bond_length
     )
-
-    # the anchor-graph path goes from the start anchor, through the two domain anchors,
-    # to the end anchor
-    assert props.path == [
-        ("start", 0),
-        ("CD0", 2),
-        ("CD0", 4),
-        ("end", 6),
-    ]
-
-    # this path consists of:
-    #   start -> CD0(2)   : IDR
-    #   CD0(2) -> CD0(4)  : rigid shortcut
-    #   CD0(4) -> end     : IDR
-    assert len(props.edge_path) == 3
-
-    # start and end residues are already anchors
-    assert props.start_offset == pytest.approx(0.0)
-    assert props.end_offset == pytest.approx(0.0)
-
-    # IDRs: 0 -> 2 and 4 -> 6, each contributes 2 * bond_length
-    assert props.random_walk_contour_length == pytest.approx(4.0 * bond_length)
-
-    # rigid shortcut inside the domain: residue 2 -> residue 4
-    assert props.fixed_distances == pytest.approx([2.0 * bond_length])
-
-    # total weight = 2*bond_length + 2*bond_length + 2*bond_length
-    assert props.total_weight == pytest.approx(6.0 * bond_length)
-
-    # both endpoints lie in topology nodes, not topology edges
-    assert props.n1 == "start"
-    assert props.n2 == "end"
-    assert props.e1 is None
-    assert props.e2 is None
-
-    # neither endpoint lies in a loop
-    assert props.start_loop is None
-    assert props.end_loop is None
 
 
 def test_path_between_two_residues_inside_same_domain():
@@ -180,40 +288,40 @@ def test_path_between_two_residues_inside_same_domain():
 
     positions = [(float(i) * bond_length, 0.0, 0.0) for i in range(7)]
 
-    props = get_path_properties(
-        topology,
-        i1=2,
-        i2=4,
-        residue_positions=positions,
-        bond_length=bond_length,
+    i1 = 2
+    i2 = 4
+
+    def assertions_fn(props: PathProperties):
+        # same rigid domain: direct shortcut, no anchor-graph traversal needed
+        assert props.path == []
+        assert props.edge_path == []
+
+        # no endpoint attachment bookkeeping is needed in this direct case
+        assert props.start_offset == pytest.approx(0.0)
+        assert props.end_offset == pytest.approx(0.0)
+
+        # there is no IDR contribution
+        assert props.random_walk_contour_length == pytest.approx(0.0)
+
+        # rigid shortcut from residue 2 to residue 4
+        assert props.fixed_distances == pytest.approx([2.0 * bond_length])
+
+        # total weight is just that rigid shortcut distance
+        assert props.total_weight == pytest.approx(2.0 * bond_length)
+
+        # both endpoints lie in the rigid node CD0, not in topology edges
+        assert props.n1 == "CD0"
+        assert props.n2 == "CD0"
+        assert props.e1 is None
+        assert props.e2 is None
+
+        # neither endpoint lies in a loop
+        assert props.start_loop is None
+        assert props.end_loop is None
+
+    _run_on_both_variants(
+        assertions_fn, topology, positions, i1, i2, bond_length=bond_length
     )
-
-    # same rigid domain: direct shortcut, no anchor-graph traversal needed
-    assert props.path == []
-    assert props.edge_path == []
-
-    # no endpoint attachment bookkeeping is needed in this direct case
-    assert props.start_offset == pytest.approx(0.0)
-    assert props.end_offset == pytest.approx(0.0)
-
-    # there is no IDR contribution
-    assert props.random_walk_contour_length == pytest.approx(0.0)
-
-    # rigid shortcut from residue 2 to residue 4
-    assert props.fixed_distances == pytest.approx([2.0 * bond_length])
-
-    # total weight is just that rigid shortcut distance
-    assert props.total_weight == pytest.approx(2.0 * bond_length)
-
-    # both endpoints lie in the rigid node CD0, not in topology edges
-    assert props.n1 == "CD0"
-    assert props.n2 == "CD0"
-    assert props.e1 is None
-    assert props.e2 is None
-
-    # neither endpoint lies in a loop
-    assert props.start_loop is None
-    assert props.end_loop is None
 
 
 def test_start_residue_inside_self_loop_records_start_loop_metadata():
@@ -243,36 +351,36 @@ def test_start_residue_inside_self_loop_records_start_loop_metadata():
         (-1.0 * bond_length, 0.0 * bond_length, 0.0),  # 7
     ]
 
-    props = get_path_properties(
-        topology,
-        i1=3,  # inside self-loop IDR 3..4
-        i2=7,
-        residue_positions=positions,
-        bond_length=bond_length,
+    i1 = 3
+    i2 = 7
+
+    def assertions_fn(props: PathProperties):
+        # We do start in an edge
+        assert props.e1 is not None
+        # Which is indeed a self loop
+        assert topology.edges[props.e1]["loop"] is True
+
+        # we are on the first residue of the loop
+        # and the loop consists of two residues (and three segments)
+        assert props.start_loop == (0, 2)
+
+        # we do not end in a loop
+        assert props.end_loop is None
+
+        # the only random segment is 6->7
+        assert props.random_walk_contour_length == 1.0 * bond_length
+
+        # residue 3 is one bond away from the left loop anchor at residue 2
+        assert props.start_offset == pytest.approx(1.0 * bond_length)
+
+        # we end at seven, which is the terminus of the protein
+        assert props.path[-1] == ("end", 7)
+
+        assert props.total_weight > 0.0
+
+    _run_on_both_variants(
+        assertions_fn, topology, positions, i1, i2, bond_length=bond_length
     )
-
-    # We do start in an edge
-    assert props.e1 is not None
-    # Which is indeed a self loop
-    assert topology.edges[props.e1]["loop"] is True
-
-    # we are on the first residue of the loop
-    # and the loop consists of two residues (and three segments)
-    assert props.start_loop == (0, 2)
-
-    # we do not end in a loop
-    assert props.end_loop is None
-
-    # the only random segment is 6->7
-    assert props.random_walk_contour_length == 1.0 * bond_length
-
-    # residue 3 is one bond away from the left loop anchor at residue 2
-    assert props.start_offset == pytest.approx(1.0 * bond_length)
-
-    # we end at seven, which is the terminus of the protein
-    assert props.path[-1] == ("end", 7)
-
-    assert props.total_weight > 0.0
 
 
 def test_end_residue_inside_self_loop_records_end_loop_metadata():
@@ -301,45 +409,44 @@ def test_end_residue_inside_self_loop_records_end_loop_metadata():
         (0.0 * bond_length, 0.0 * bond_length, 0.0),  # 6
         (-1.0 * bond_length, 0.0 * bond_length, 0.0),  # 7
     ]
+    i1 = 0
+    i2 = 4  # inside self-loop IDR 3..4
 
-    props = get_path_properties(
-        topology,
-        i1=0,
-        i2=4,  # inside self-loop IDR 3..4
-        residue_positions=positions,
-        bond_length=bond_length,
+    def assertions_fn(props: PathProperties):
+        # We start at residue 0, which is not inside a loop
+        assert props.start_loop is None
+
+        # We end in an edge
+        assert props.e2 is not None
+        # Which is indeed a self loop
+        assert topology.edges[props.e2]["loop"] is True
+
+        # we are on the second residue of the loop (index 1 of 2)
+        # and the loop consists of two residues (and three segments)
+        assert props.end_loop == (1, 2)
+
+        # the only random segment is 0 -> 1
+        assert props.random_walk_contour_length == pytest.approx(1.0 * bond_length)
+
+        # residue 4 is one bond away from the right loop anchor at residue 5
+        assert props.end_offset == pytest.approx(1.0 * bond_length)
+
+        # start residue is already at the start anchor
+        assert props.start_offset == pytest.approx(0.0)
+
+        # rigid shortcut from residue 1 to residue 5
+        # distance = sqrt(2) * bond_length
+        assert props.fixed_distances == pytest.approx([np.sqrt(2.0) * bond_length])
+
+        # we start at the start anchor
+        assert props.path[0] == ("start", 0)
+
+        # total weight = bond_length + sqrt(2)*bond_length + bond_length
+        assert props.total_weight == pytest.approx((2.0 + np.sqrt(2.0)) * bond_length)
+
+    _run_on_both_variants(
+        assertions_fn, topology, positions, i1, i2, bond_length=bond_length
     )
-
-    # We start at residue 0, which is not inside a loop
-    assert props.start_loop is None
-
-    # We end in an edge
-    assert props.e2 is not None
-    # Which is indeed a self loop
-    assert topology.edges[props.e2]["loop"] is True
-
-    # we are on the second residue of the loop (index 1 of 2)
-    # and the loop consists of two residues (and three segments)
-    assert props.end_loop == (1, 2)
-
-    # the only random segment is 0 -> 1
-    assert props.random_walk_contour_length == pytest.approx(1.0 * bond_length)
-
-    # residue 4 is one bond away from the right loop anchor at residue 5
-    assert props.end_offset == pytest.approx(1.0 * bond_length)
-
-    # start residue is already at the start anchor
-    assert props.start_offset == pytest.approx(0.0)
-
-    # rigid shortcut from residue 1 to residue 5
-    # distance = sqrt(2) * bond_length
-    assert props.fixed_distances == pytest.approx([np.sqrt(2.0) * bond_length])
-
-    # we start at the start anchor
-    assert props.path[0] == ("start", 0)
-
-    # total weight = bond_length + sqrt(2)*bond_length + bond_length
-    assert props.total_weight == pytest.approx((2.0 + np.sqrt(2.0)) * bond_length)
 
 
 def test_segment_length_normalizes_total_weight_and_idr_contribution():
@@ -377,23 +484,28 @@ def test_segment_length_normalizes_total_weight_and_idr_contribution():
 
     positions = [(float(i) * bond_length, 0.0, 0.0) for i in range(7)]
 
-    props = get_path_properties(
+    i1 = 0
+    i2 = 6
+
+    def assertions_fn(props: PathProperties):
+        # total weight is normalized by segment_length
+        assert props.total_weight == pytest.approx(12.0)
+
+        # only IDR contributions are accumulated here, also normalized
+        assert props.random_walk_contour_length == pytest.approx(8.0)
+
+        # rigid shortcut distance remains a physical distance
+        assert props.fixed_distances == pytest.approx([2.0 * bond_length])
+
+    _run_on_both_variants(
+        assertions_fn,
         topology,
-        i1=0,
-        i2=6,
-        residue_positions=positions,
+        positions,
+        i1,
+        i2,
         bond_length=bond_length,
         segment_length=0.25,
     )
-
-    # total weight is normalized by segment_length
-    assert props.total_weight == pytest.approx(12.0)
-
-    # only IDR contributions are accumulated here, also normalized
-    assert props.random_walk_contour_length == pytest.approx(8.0)
-
-    # rigid shortcut distance remains a physical distance
-    assert props.fixed_distances == pytest.approx([2.0 * bond_length])
 
 
 def test_endpoint_idr_offset_is_absorbed_into_random_walk_contour_length():
@@ -436,37 +548,37 @@ def test_endpoint_idr_offset_is_absorbed_into_random_walk_contour_length():
 
     positions = [(float(i) * bond_length, 0.0, 0.0) for i in range(7)]
 
-    props = get_path_properties(
-        topology,
-        i1=0,
-        i2=5,  # inside the right-hand IDR adjacent to CD0
-        residue_positions=positions,
-        bond_length=bond_length,
+    i1 = 0
+    i2 = 5  # inside the right-hand IDR adjacent to CD0
+
+    def assertions_fn(props: PathProperties):
+        # the path should go from the start anchor, through the left domain anchor,
+        # through the right domain anchor, and then terminate at residue 5 via the
+        # same contour segment that connects 4 -> 5 -> 6
+        assert props.path == [
+            ("start", 0),
+            ("CD0", 2),
+            ("CD0", 4),
+        ]
+
+        # physically, the contour length should include both IDR pieces:
+        #   0 -> 1 -> 2   and   4 -> 5
+        assert props.random_walk_contour_length == pytest.approx(3.0 * bond_length)
+
+        # the rigid shortcut is 2 -> 4
+        assert props.fixed_distances == pytest.approx([2.0 * bond_length])
+
+        # once the endpoint contour segment has been absorbed into the decomposition,
+        # there should be no leftover endpoint bookkeeping
+        assert props.start_offset == pytest.approx(0.0)
+        assert props.end_offset == pytest.approx(0.0)
+
+        # total = 3*b + 2*b = 5*b
+        assert props.total_weight == pytest.approx(5.0 * bond_length)
+
+    _run_on_both_variants(
+        assertions_fn, topology, positions, i1, i2, bond_length=bond_length
     )
-
-    # the path should go from the start anchor, through the left domain anchor,
-    # through the right domain anchor, and then terminate at residue 5 via the
-    # same contour segment that connects 4 -> 5 -> 6
-    assert props.path == [
-        ("start", 0),
-        ("CD0", 2),
-        ("CD0", 4),
-    ]
-
-    # physically, the contour length should include both IDR pieces:
-    #   0 -> 1 -> 2   and   4 -> 5
-    assert props.random_walk_contour_length == pytest.approx(3.0 * bond_length)
-
-    # the rigid shortcut is 2 -> 4
-    assert props.fixed_distances == pytest.approx([2.0 * bond_length])
-
-    # once the endpoint contour segment has been absorbed into the decomposition,
-    # there should be no leftover endpoint bookkeeping
-    assert props.start_offset == pytest.approx(0.0)
-    assert props.end_offset == pytest.approx(0.0)
-
-    # total = 3*b + 2*b = 5*b
-    assert props.total_weight == pytest.approx(5.0 * bond_length)
 
 
 def test_last_residue_in_rigid_domain_does_not_get_misclassified_as_end():
@@ -493,29 +605,29 @@ def test_last_residue_in_rigid_domain_does_not_get_misclassified_as_end():
     bond_length = 0.5
     positions = [(float(i) * bond_length, 0.0, 0.0) for i in range(6)]
 
-    props = get_path_properties(
-        topology,
-        i1=0,
-        i2=5,
-        residue_positions=positions,
-        bond_length=bond_length,
+    i1 = 0
+    i2 = 5
+
+    def assertions_fn(props: PathProperties):
+        # the last residue lies inside the rigid domain CD0
+        assert props.n2 == "CD0"
+        assert props.e2 is None
+
+        # path from 0 to 5 is:
+        #   0 -> 1 -> 2 -> 3   (IDR: 3 bonds)
+        #   3 -> 5             (rigid shortcut)
+        #
+        # so:
+        #   random_walk_contour_length = 3 * bond_length
+        #   fixed_distances            = [distance(3,5)] = [2 * bond_length]
+        #   end_offset                 = 0
+        assert props.random_walk_contour_length == pytest.approx(3.0 * bond_length)
+        assert props.fixed_distances == pytest.approx([2.0 * bond_length])
+        assert props.end_offset == pytest.approx(0.0)
+
+    _run_on_both_variants(
+        assertions_fn, topology, positions, i1, i2, bond_length=bond_length
     )
-
-    # the last residue lies inside the rigid domain CD0
-    assert props.n2 == "CD0"
-    assert props.e2 is None
-
-    # path from 0 to 5 is:
-    #   0 -> 1 -> 2 -> 3   (IDR: 3 bonds)
-    #   3 -> 5             (rigid shortcut)
-    #
-    # so:
-    #   random_walk_contour_length = 3 * bond_length
-    #   fixed_distances            = [distance(3,5)] = [2 * bond_length]
-    #   end_offset                 = 0
-    assert props.random_walk_contour_length == pytest.approx(3.0 * bond_length)
-    assert props.fixed_distances == pytest.approx([2.0 * bond_length])
-    assert props.end_offset == pytest.approx(0.0)
 
 
 def test_first_residue_in_rigid_domain_does_not_get_misclassified_as_start():
@@ -539,29 +651,29 @@ def test_first_residue_in_rigid_domain_does_not_get_misclassified_as_start():
     bond_length = 0.5
     positions = [(float(i) * bond_length, 0.0, 0.0) for i in range(6)]
 
-    props = get_path_properties(
-        topology,
-        i1=0,
-        i2=5,
-        residue_positions=positions,
-        bond_length=bond_length,
+    i1 = 0
+    i2 = 5
+
+    def assertions_fn(props: PathProperties):
+        # the first residue lies inside the rigid domain CD0
+        assert props.n1 == "CD0"
+        assert props.e1 is None
+
+        # path from 0 to 5 is:
+        #   0 -> 2             (rigid shortcut)
+        #   2 -> 3 -> 4 -> 5   (IDR: 3 bonds)
+        #
+        # so:
+        #   random_walk_contour_length = 3 * bond_length
+        #   fixed_distances            = [distance(0,2)] = [2 * bond_length]
+        #   start_offset               = 0
+        assert props.random_walk_contour_length == pytest.approx(3.0 * bond_length)
+        assert props.fixed_distances == pytest.approx([2.0 * bond_length])
+        assert props.start_offset == pytest.approx(0.0)
+
+    _run_on_both_variants(
+        assertions_fn, topology, positions, i1, i2, bond_length=bond_length
     )
-
-    # the first residue lies inside the rigid domain CD0
-    assert props.n1 == "CD0"
-    assert props.e1 is None
-
-    # path from 0 to 5 is:
-    #   0 -> 2             (rigid shortcut)
-    #   2 -> 3 -> 4 -> 5   (IDR: 3 bonds)
-    #
-    # so:
-    #   random_walk_contour_length = 3 * bond_length
-    #   fixed_distances            = [distance(0,2)] = [2 * bond_length]
-    #   start_offset               = 0
-    assert props.random_walk_contour_length == pytest.approx(3.0 * bond_length)
-    assert props.fixed_distances == pytest.approx([2.0 * bond_length])
-    assert props.start_offset == pytest.approx(0.0)
 
 
 def test_negative_residue_index_raises():
