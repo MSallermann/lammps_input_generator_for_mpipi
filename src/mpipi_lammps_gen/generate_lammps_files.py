@@ -226,6 +226,121 @@ def trim_protein(prot: ProteinData, start: int, end: int) -> ProteinData:
     )
 
 
+def rigid_transform_protein(
+    prot_data: ProteinData,
+    rotation_matrix: Iterable,
+    translation_vector: Iterable[float],
+) -> ProteinData:
+    rotation_matrix = np.squeeze(np.array(rotation_matrix))
+    translation_vector = np.squeeze(np.array(translation_vector))
+
+    assert rotation_matrix.shape == (3, 3)
+    assert translation_vector.shape == (3,)
+
+    if prot_data.residue_positions is not None:
+        new_residue_positions = [
+            tuple(rotation_matrix @ p + translation_vector)
+            for p in prot_data.residue_positions
+        ]
+    else:
+        new_residue_positions = None
+
+    if prot_data.atom_xyz is not None:
+        new_atom_xyz = [
+            [tuple(rotation_matrix @ p + translation_vector) for p in r]
+            for r in prot_data.atom_xyz
+        ]
+    else:
+        new_atom_xyz = None
+
+    return ProteinData(
+        atom_xyz=new_atom_xyz,
+        atom_types=prot_data.atom_types,
+        residue_positions=new_residue_positions,
+        sequence_one_letter=prot_data.sequence_one_letter,
+        sequence_three_letter=prot_data.sequence_three_letter,
+        plddts=prot_data.plddts,
+        pae=prot_data.pae,
+    )
+
+
+def concatenate_proteins(
+    prot_data1: ProteinData,
+    prot_data2: ProteinData,
+    connecting_vector: Iterable[float] | None = None,
+) -> ProteinData:
+    if connecting_vector is not None:
+        connecting_vector = np.array(connecting_vector)
+        rot_matrix = np.eye(3)
+
+        assert prot_data1.residue_positions is not None
+        assert prot_data2.residue_positions is not None
+
+        v1 = np.array(prot_data1.residue_positions[-1])
+        v2 = np.array(prot_data2.residue_positions[0])
+
+        translation_vector = v1 - v2 + connecting_vector
+
+        prot_data2 = rigid_transform_protein(
+            prot_data2,
+            rotation_matrix=rot_matrix,
+            translation_vector=translation_vector,
+        )
+
+    if (
+        prot_data1.residue_positions is not None
+        and prot_data2.residue_positions is not None
+    ):
+        new_residue_positions = [
+            *prot_data1.residue_positions,
+            *prot_data2.residue_positions,
+        ]
+    else:
+        new_residue_positions = None
+
+    new_sequence_one_letter = (
+        prot_data1.sequence_one_letter + prot_data2.sequence_one_letter
+    )
+
+    if (
+        prot_data1.sequence_three_letter is not None
+        and prot_data2.sequence_three_letter is not None
+    ):
+        new_sequence_three_letter = (
+            prot_data1.sequence_three_letter + prot_data2.sequence_three_letter
+        )
+    else:
+        new_sequence_three_letter = None
+
+    if prot_data1.plddts is not None and prot_data2.plddts is not None:
+        new_plddts = [*prot_data1.plddts, *prot_data2.plddts]
+    else:
+        new_plddts = None
+
+    if prot_data1.atom_xyz is not None and prot_data2.atom_xyz is not None:
+        new_atom_xyz = [*prot_data1.atom_xyz, *prot_data2.atom_xyz]
+    else:
+        new_atom_xyz = None
+
+    if prot_data1.atom_types is not None and prot_data2.atom_types is not None:
+        new_atom_types = [*prot_data1.atom_types, *prot_data2.atom_types]
+    else:
+        new_atom_types = None
+
+    # There's no good way to combine PAEs like this
+    new_pae = None
+
+    return ProteinData(
+        atom_xyz=new_atom_xyz,
+        atom_types=new_atom_types,
+        residue_positions=new_residue_positions,
+        sequence_one_letter=new_sequence_one_letter,
+        sequence_three_letter=new_sequence_three_letter,
+        plddts=new_plddts,
+        pae=new_pae,
+    )
+
+
 def parse_cif(
     cif_text: str, method: Literal["Ca", "com"] | Iterable[Literal["Ca", "com"]]
 ) -> ProteinData:
