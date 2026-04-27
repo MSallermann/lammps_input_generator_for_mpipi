@@ -259,118 +259,161 @@ def shortest_path_matrix(
     return distance_matrix
 
 
-def protein_topology(
+def protein_topology(  # noqa: PLR0912
     n_residues: int,
     domains: Sequence[GlobularDomain],
+    chain_break_after: Iterable[int] | None = None,
 ) -> nx.MultiGraph:
     """
     Generate an undirected NetworkX MultiGraph representing protein topology.
 
-    In this representation:
-        - Nodes correspond to globular (rigid) domains and terminal points.
-        - Edges correspond to contiguous stretches of disordered residues (IDRs)
-        between rigid regions and/or termini.
+    Compared with the original version, this supports multiple terminal pairs.
+    A chain break after residue i means there is no backbone continuity between
+    residue i and residue i + 1.
 
-    Nodes:
-        - Two special nodes are always present:
-            - "start": represents the N-terminus (residue index 0)
-            - "end": represents the C-terminus (residue index n_residues - 1)
-        - Each globular domain is added as a node named "CD{i}", where i is the
-        index in the input sequence (0-based).
-        - Node attributes:
-            - "weight": number of atoms in the domain (or 1 for start/end)
-            - "indices": set of residue indices belonging to that node
+    For the old single-chain case:
+        terminal nodes are still named "start" and "end".
 
-    Edges:
-        - The graph is a MultiGraph: multiple edges between the same pair of nodes
-        and self-loops are allowed.
-        - Each edge represents one contiguous disordered segment (IDR).
-        - Edges are created:
-            - when entering a globular domain from a disordered region, and
-            - at the end of the sequence (connecting the last anchor to "end").
-        - No edge is created if two nodes are adjacent with no disordered residues
-        between them (i.e., zero-length segments are skipped).
+    For multi-segment cases:
+        terminal nodes are named "start_0", "end_0", "start_1", "end_1", ...
 
-        - Edge attributes:
-            - "start_idx": first residue index in the disordered segment
-            - "end_idx": last residue index in the disordered segment (inclusive)
-            - "length": number of residues in the segment, i.e.
-            (end_idx - start_idx + 1)
-            - "weight": defined as 1.0 / length
-            - "loop": True if the edge connects a node to itself
-
-    Important notes:
-        - Overlapping domains are not allowed; a ValueError is raised if a residue
-        belongs to more than one domain.
-        - If a domain starts at residue 0, no edge is created between "start" and
-        that domain.
-        - If a domain ends at residue n_residues - 1, no edge is created between
-        that domain and "end".
-
-    Returns:
-        nx.MultiGraph: Graph encoding the protein topology.
+    Globular domain nodes are still shared globally as "CD{i}".
     """
 
     graph = nx.MultiGraph()
 
-    graph.add_node("start", weight=1, indices={0})
-    graph.add_node("end", weight=1, indices={n_residues - 1})
+    chain_break_after_set = set(chain_break_after or [])
 
+    for idx in chain_break_after_set:
+        if idx < 0 or idx >= n_residues - 1:
+            msg = f"Invalid chain break after residue {idx}. "
+            f"Expected 0 <= idx < {n_residues - 1}."
+            raise ValueError(msg)
+
+    # Add globular domain nodes.
     for i, d in enumerate(domains):
-        graph.add_node(f"CD{i}", weight=d.n_atoms(), indices=set(d.get_all_indices()))
+        graph.add_node(
+            f"CD{i}",
+            weight=d.n_atoms(),
+            indices=set(d.get_all_indices()),
+            kind="domain",
+        )
 
+    # Build residue -> domain lookup.
     residue_to_domain: list[int | None] = [None] * n_residues
+
     for i, d in enumerate(domains):
         for idx in d.get_all_indices():
+            if idx < 0 or idx >= n_residues:
+                msg = f"Domain {i} contains residue index {idx},"
+                f"but n_residues={n_residues}."
+                raise ValueError(msg)
+
             if residue_to_domain[idx] is not None:
                 msg = (
                     f"Residue {idx} belongs to multiple domains: "
                     f"{residue_to_domain[idx]} and {i}"
                 )
                 raise ValueError(msg)
+
             residue_to_domain[idx] = i
 
-    edge_start = "start"
-    edge_start_idx = 0
-    grp_idx_prev_res = None
+    # Convert break positions into continuous residue intervals.
+    #
+    # Example:
+    #   n_residues = 10
+    #   chain_break_after = {3, 6}
+    #
+    # gives:
+    #   (0, 3), (4, 6), (7, 9)
+    segment_starts = [0]
+    segment_ends = []
 
-    for i_res in range(n_residues):
-        this_grp_idx = residue_to_domain[i_res]
+    for break_after in sorted(chain_break_after_set):
+        segment_ends.append(break_after)
+        segment_starts.append(break_after + 1)
 
-        if this_grp_idx is not None and this_grp_idx != grp_idx_prev_res:
-            end_idx = i_res - 1  # previous residue was the last disordered one
+    segment_ends.append(n_residues - 1)
 
-            if end_idx >= edge_start_idx:
-                segment_length = end_idx - edge_start_idx + 1
+    segments = list(zip(segment_starts, segment_ends, strict=True))
+
+    single_segment = len(segments) == 1
+
+    def terminal_names(segment_idx: int) -> tuple[str, str]:
+        if single_segment:
+            return "start", "end"
+        return f"start_{segment_idx}", f"end_{segment_idx}"
+
+    for segment_idx, (seg_start, seg_end) in enumerate(segments):
+        start_node, end_node = terminal_names(segment_idx)
+
+        graph.add_node(
+            start_node,
+            weight=1,
+            indices={seg_start},
+            kind="terminus",
+            terminus="start",
+            segment_idx=segment_idx,
+        )
+        graph.add_node(
+            end_node,
+            weight=1,
+            indices={seg_end},
+            kind="terminus",
+            terminus="end",
+            segment_idx=segment_idx,
+        )
+
+        edge_start = start_node
+        edge_start_idx = seg_start
+        grp_idx_prev_res = None
+
+        for i_res in range(seg_start, seg_end + 1):
+            this_grp_idx = residue_to_domain[i_res]
+
+            # Entering a domain from an IDR or from the segment start.
+            if this_grp_idx is not None and this_grp_idx != grp_idx_prev_res:
+                end_idx = i_res - 1
+
+                if end_idx >= edge_start_idx:
+                    segment_length = end_idx - edge_start_idx + 1
+                    target_node = f"CD{this_grp_idx}"
+
+                    graph.add_edge(
+                        edge_start,
+                        target_node,
+                        length=segment_length,
+                        weight=1.0 / segment_length,
+                        start_idx=edge_start_idx,
+                        end_idx=end_idx,
+                        loop=(edge_start == target_node),
+                        kind="idr",
+                        segment_idx=segment_idx,
+                    )
+
+            # Leaving a domain into an IDR.
+            elif this_grp_idx is None and grp_idx_prev_res is not None:
+                edge_start = f"CD{grp_idx_prev_res}"
+                edge_start_idx = i_res
+
+            grp_idx_prev_res = this_grp_idx
+
+        # Add final IDR tail to this segment's terminal end.
+        if grp_idx_prev_res is None:
+            final_length = seg_end - edge_start_idx + 1
+
+            if final_length > 0:
                 graph.add_edge(
                     edge_start,
-                    f"CD{this_grp_idx}",
-                    length=segment_length,
-                    weight=1.0 / segment_length,
+                    end_node,
+                    length=final_length,
+                    weight=1.0 / final_length,
                     start_idx=edge_start_idx,
-                    end_idx=end_idx,
-                    loop=(edge_start == f"CD{this_grp_idx}"),
+                    end_idx=seg_end,
+                    loop=False,
+                    kind="idr",
+                    segment_idx=segment_idx,
                 )
-
-        elif this_grp_idx is None and grp_idx_prev_res is not None:
-            edge_start = f"CD{grp_idx_prev_res}"
-            edge_start_idx = i_res  # first disordered residue
-
-        grp_idx_prev_res = this_grp_idx
-
-    end_idx = n_residues - 1
-    if end_idx >= edge_start_idx and grp_idx_prev_res is None:
-        end_idx = n_residues - 1
-        final_length = end_idx - edge_start_idx + 1
-        graph.add_edge(
-            edge_start,
-            "end",
-            length=final_length,
-            weight=1.0 / final_length,
-            start_idx=edge_start_idx,
-            end_idx=end_idx,
-            loop=False,
-        )
 
     return graph
 

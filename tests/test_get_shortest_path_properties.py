@@ -676,6 +676,343 @@ def test_first_residue_in_rigid_domain_does_not_get_misclassified_as_start():
     )
 
 
+def _make_two_segment_fused_topology() -> tuple[
+    MultiGraph, list[tuple[float, float, float]], float
+]:
+    """
+    Build a topology with two backbone segments fused by one shared globular domain.
+
+    Residue-level picture:
+
+        segment 0                         segment 1
+        chain break after residue 4       starts at residue 5
+
+        0 ─► 1 ─► [2 ─► 3] ─► 4     X     5 ─► [6 ─► 7] ─► 8 ─► 9
+                  CD0                                   CD0
+
+    Topology-level picture:
+
+        start_0 ── IDR(0,1) ──► CD0 ── IDR(4) ──► end_0
+                                  │
+                                  │ shared rigid domain node
+                                  │
+        start_1 ── IDR(5) ─────► CD0 ── IDR(8,9) ──► end_1
+
+    Important features:
+
+      - residues 4 and 5 are adjacent as global indices, but are not bonded
+      - the graph is still connected because both segments touch CD0
+      - segment 1 has a two-residue terminal IDR, 8..9, so we can test that
+        "end_1" behaves like the old literal "end" node
+    """
+
+    d0 = GlobularDomain(indices=[(2, 3), (6, 7)])
+
+    topology = protein_topology(
+        n_residues=10,
+        domains=[d0],
+        chain_break_after={4},
+    )
+
+    bond_length = 1.0
+
+    # Positions are chosen to make the relevant rigid shortcuts simple:
+    #
+    #   distance(2, 7) = 2.0
+    #   distance(3, 6) = 2.0
+    #
+    # The y coordinates separate the two CD0 anchor pairs so the intended
+    # shortcuts are easy to reason about.
+    positions = [
+        (0.0, 0.0, 0.0),  # 0, start_0
+        (1.0, 0.0, 0.0),  # 1
+        (2.0, 0.0, 0.0),  # 2, CD0 anchor
+        (2.0, 10.0, 0.0),  # 3, CD0 anchor
+        (2.0, 11.0, 0.0),  # 4, end_0
+        (4.0, 11.0, 0.0),  # 5, start_1
+        (4.0, 10.0, 0.0),  # 6, CD0 anchor
+        (4.0, 0.0, 0.0),  # 7, CD0 anchor
+        (5.0, 0.0, 0.0),  # 8
+        (6.0, 0.0, 0.0),  # 9, end_1
+    ]
+
+    return topology, positions, bond_length
+
+
+def test_multisegment_topology_has_multiple_terminal_nodes_and_shared_domain():
+    # Residue-level picture:
+    #
+    #     0 ─► 1 ─► [2 ─► 3] ─► 4     X     5 ─► [6 ─► 7] ─► 8 ─► 9
+    #               CD0                                   CD0
+    #
+    # Topology-level picture:
+    #
+    #     start_0 ── IDR(0,1) ──► CD0 ── IDR(4) ──► end_0
+    #                               │
+    #                               │
+    #     start_1 ── IDR(5) ─────► CD0 ── IDR(8,9) ──► end_1
+    #
+    # Cross-segment path from 0 to 9:
+    #
+    #     start_0(0) -> CD0(2)     IDR length 2
+    #     CD0(2)    -> CD0(7)     rigid shortcut distance 2
+    #     CD0(7)    -> end_1(9)   IDR length 2
+    #
+    # so:
+    #     random_walk_contour_length = 4
+    #     fixed_distances            = [2]
+    #     total_weight               = 6
+
+    topology, positions, bond_length = _make_two_segment_fused_topology()
+
+    assert "start_0" in topology.nodes
+    assert "end_0" in topology.nodes
+    assert "start_1" in topology.nodes
+    assert "end_1" in topology.nodes
+
+    assert topology.nodes["start_0"]["indices"] == {0}
+    assert topology.nodes["end_0"]["indices"] == {4}
+    assert topology.nodes["start_1"]["indices"] == {5}
+    assert topology.nodes["end_1"]["indices"] == {9}
+
+    assert topology.nodes["start_0"]["terminus"] == "start"
+    assert topology.nodes["end_0"]["terminus"] == "end"
+    assert topology.nodes["start_1"]["terminus"] == "start"
+    assert topology.nodes["end_1"]["terminus"] == "end"
+
+    assert topology.nodes["CD0"]["indices"] == {2, 3, 6, 7}
+
+    i1 = 0
+    i2 = 9
+
+    def assertions_fn(props: PathProperties):
+        assert props.path == [
+            ("start_0", 0),
+            ("CD0", 2),
+            ("CD0", 7),
+            ("end_1", 9),
+        ]
+
+        assert len(props.edge_path) == 3
+
+        assert props.random_walk_contour_length == pytest.approx(4.0)
+        assert props.fixed_distances == pytest.approx([2.0])
+        assert props.total_weight == pytest.approx(6.0)
+
+        assert props.start_offset == pytest.approx(0.0)
+        assert props.end_offset == pytest.approx(0.0)
+
+        assert props.n1 == "start_0"
+        assert props.n2 == "end_1"
+        assert props.e1 is None
+        assert props.e2 is None
+
+        assert props.start_loop is None
+        assert props.end_loop is None
+
+    _run_on_both_variants(
+        assertions_fn,
+        topology,
+        positions,
+        i1,
+        i2,
+        bond_length=bond_length,
+    )
+
+
+def test_adjacent_global_indices_separated_by_chain_break_are_not_same_contour_edge():
+    # Residue-level picture:
+    #
+    #     0 ─► 1 ─► [2 ─► 3] ─► 4     X     5 ─► [6 ─► 7] ─► 8 ─► 9
+    #                            ^     ^     ^
+    #                            │     │     │
+    #                            i1  break   i2
+    #
+    # Residues 4 and 5 are adjacent global indices, but there is a chain break
+    # between them. They must not be treated as one bonded contour step.
+    #
+    # Correct topology-level path:
+    #
+    #     end_0(4)   -> CD0(3)       IDR length 1
+    #     CD0(3)    -> CD0(6)       rigid shortcut distance 2
+    #     CD0(6)    -> start_1(5)   IDR length 1
+    #
+    # so:
+    #     random_walk_contour_length = 2
+    #     fixed_distances            = [2]
+    #     total_weight               = 4
+    #
+    # If the chain break were ignored, this would incorrectly look like:
+    #
+    #     4 ─► 5
+    #
+    # with total_weight = 1.
+
+    topology, positions, bond_length = _make_two_segment_fused_topology()
+
+    i1 = 4
+    i2 = 5
+
+    def assertions_fn(props: PathProperties):
+        assert props.path == [
+            ("end_0", 4),
+            ("CD0", 3),
+            ("CD0", 6),
+            ("start_1", 5),
+        ]
+
+        assert len(props.edge_path) == 3
+
+        assert props.random_walk_contour_length == pytest.approx(2.0)
+        assert props.fixed_distances == pytest.approx([2.0])
+        assert props.total_weight == pytest.approx(4.0)
+
+        assert props.start_offset == pytest.approx(0.0)
+        assert props.end_offset == pytest.approx(0.0)
+
+        assert props.n1 == "end_0"
+        assert props.n2 == "start_1"
+        assert props.e1 is None
+        assert props.e2 is None
+
+    _run_on_both_variants(
+        assertions_fn,
+        topology,
+        positions,
+        i1,
+        i2,
+        bond_length=bond_length,
+    )
+
+
+def test_multisegment_terminal_residues_map_to_adjacent_contour_edges():
+    # This checks that "start_0" and "end_1" behave like the old literal
+    # "start" and "end" nodes in _find_contour_edge_of_residue(...).
+    #
+    # Left terminal contour edge:
+    #
+    #     start_0
+    #       │
+    #       ▼
+    #       0 ─► 1 ─► [2 ─► 3]
+    #                 CD0
+    #
+    # residues 0 and 1 lie on the same start_0 -> CD0 contour edge.
+    #
+    # Right terminal contour edge:
+    #
+    #                CD0
+    #             [6 ─► 7] ─► 8 ─► 9
+    #                              ▲
+    #                              │
+    #                            end_1
+    #
+    # residues 8 and 9 lie on the same CD0 -> end_1 contour edge.
+    #
+    # Both cases should use the direct same-contour-edge branch:
+    #
+    #     path      = []
+    #     edge_path = []
+    #
+    # rather than going through the anchor graph.
+
+    topology, positions, bond_length = _make_two_segment_fused_topology()
+
+    def assertions_left_terminal(props: PathProperties):
+        assert props.path == []
+        assert props.edge_path == []
+
+        assert props.random_walk_contour_length == pytest.approx(1.0)
+        assert props.fixed_distances == []
+        assert props.total_weight == pytest.approx(1.0)
+
+        assert props.start_offset == pytest.approx(0.0)
+        assert props.end_offset == pytest.approx(0.0)
+
+    _run_on_both_variants(
+        assertions_left_terminal,
+        topology,
+        positions,
+        0,
+        1,
+        bond_length=bond_length,
+    )
+
+    def assertions_right_terminal(props: PathProperties):
+        assert props.path == []
+        assert props.edge_path == []
+
+        assert props.random_walk_contour_length == pytest.approx(1.0)
+        assert props.fixed_distances == []
+        assert props.total_weight == pytest.approx(1.0)
+
+        assert props.start_offset == pytest.approx(0.0)
+        assert props.end_offset == pytest.approx(0.0)
+
+    _run_on_both_variants(
+        assertions_right_terminal,
+        topology,
+        positions,
+        8,
+        9,
+        bond_length=bond_length,
+    )
+
+
+def test_disconnected_segments_raise_no_path_found():
+    # Residue-level picture:
+    #
+    #     segment 0                 segment 1
+    #
+    #     0 ─► 1 ─► [2 ─► 3]        4 ─► 5 ─► [6 ─► 7]
+    #               CD0                       CD1
+    #
+    # There is a chain break after residue 3:
+    #
+    #     0 ─► 1 ─► [2 ─► 3]   X   4 ─► 5 ─► [6 ─► 7]
+    #
+    # Unlike the fused tests, the two segments do not share a globular domain.
+    #
+    # Topology-level picture:
+    #
+    #     start_0 ── IDR(0,1) ──► CD0
+    #
+    #     start_1 ── IDR(4,5) ──► CD1
+    #
+    # There is no path from segment 0 to segment 1, so a cross-segment query
+    # should fail.
+
+    d0 = GlobularDomain(indices=[(2, 3)])
+    d1 = GlobularDomain(indices=[(6, 7)])
+
+    topology = protein_topology(
+        n_residues=8,
+        domains=[d0, d1],
+        chain_break_after={3},
+    )
+
+    bond_length = 1.0
+    positions = [(float(i), 0.0, 0.0) for i in range(8)]
+
+    with pytest.raises(ValueError, match="No path found between residues 0 and 7"):
+        get_path_properties(
+            topology,
+            i1=0,
+            i2=7,
+            residue_positions=positions,
+            bond_length=bond_length,
+        )
+
+    cache = build_path_query_cache(
+        topology=topology,
+        residue_positions=positions,
+        bond_length=bond_length,
+    )
+
+    with pytest.raises(ValueError, match="No path found between residues 0 and 7"):
+        get_path_properties_cached(cache, 0, 7)
+
+
 def test_negative_residue_index_raises():
     topology = protein_topology(
         n_residues=5,

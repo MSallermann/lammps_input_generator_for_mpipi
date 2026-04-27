@@ -13,6 +13,24 @@ if TYPE_CHECKING:
 
 AnchorNode: TypeAlias = tuple[str, int]
 TopologyEdgeRef: TypeAlias = tuple[str, str, int]
+ShortestPathEdgeRef: TypeAlias = tuple[AnchorNode, AnchorNode, int]
+
+
+def _is_start_terminus(topology: nx.MultiGraph, node: str) -> bool:
+    """Return True if node is a start/N-terminal bookkeeping node."""
+    data = topology.nodes[node]
+    return node == "start" or data.get("terminus") == "start"
+
+
+def _is_end_terminus(topology: nx.MultiGraph, node: str) -> bool:
+    """Return True if node is an end/C-terminal bookkeeping node."""
+    data = topology.nodes[node]
+    return node == "end" or data.get("terminus") == "end"
+
+
+def _is_terminus(topology: nx.MultiGraph, node: str) -> bool:
+    """Return True if node is any bookkeeping terminal node."""
+    return _is_start_terminus(topology, node) or _is_end_terminus(topology, node)
 
 
 def _edge_anchor_nodes(
@@ -26,9 +44,9 @@ def _edge_anchor_nodes(
 
     For an IDR spanning [start_idx, end_idx]:
         - the left anchor is the rigid residue with the largest index < start_idx,
-          or the terminal residue of "start" if that node is an endpoint
+          or the terminal residue of a start terminus
         - the right anchor is the rigid residue with the smallest index > end_idx,
-          or the terminal residue of "end" if that node is an endpoint
+          or the terminal residue of an end terminus
     """
     u, v, k = edge
     data = topology.edges[u, v, k]
@@ -42,14 +60,12 @@ def _edge_anchor_nodes(
     for node in {u, v}:
         indices = topology.nodes[node]["indices"]
 
-        if node == "start":
-            # "start" is always the left terminal anchor
+        if _is_start_terminus(topology, node):
             idx = next(iter(indices))
             left_candidates.append((node, idx))
             continue
 
-        if node == "end":
-            # "end" is always the right terminal anchor
+        if _is_end_terminus(topology, node):
             idx = next(iter(indices))
             right_candidates.append((node, idx))
             continue
@@ -104,12 +120,6 @@ def build_shortest_path_graph(
     If `segment_length` is provided, all distances are divided by it, so the
     resulting weights are expressed in effective random-walk segment counts.
     Otherwise, weights are expressed in distance units.
-
-    NOTE:
-        We explicitly connect all anchors within a domain (complete graph).
-        This is redundant under Euclidean distances (triangle inequality),
-        but keeps the model simple and allows use of standard NetworkX
-        shortest path algorithms without custom logic.
     """
     pos = np.asarray(residue_positions, dtype=float)
     if pos.ndim != 2 or pos.shape[1] != 3:
@@ -130,7 +140,7 @@ def build_shortest_path_graph(
     path_graph = nx.MultiGraph()
     anchors_by_topology_node: dict[str, set[int]] = defaultdict(set)
 
-    # Add IDR edges
+    # Add IDR edges.
     for u, v, k, data in topology.edges(keys=True, data=True):
         a_left, a_right = _edge_anchor_nodes(topology, (u, v, k))
 
@@ -158,9 +168,9 @@ def build_shortest_path_graph(
             loop=bool(data["loop"]),
         )
 
-    # Add domain shortcut edges
+    # Add rigid-domain shortcut edges.
     for topo_node, anchor_indices in anchors_by_topology_node.items():
-        if topo_node in {"start", "end"}:
+        if _is_terminus(topology, topo_node):
             continue
 
         sorted_indices = sorted(anchor_indices)
@@ -189,9 +199,6 @@ def build_shortest_path_graph(
     return path_graph
 
 
-ShortestPathEdgeRef: TypeAlias = tuple[AnchorNode, AnchorNode, int]
-
-
 @dataclass
 class PathProperties:
     """Properties of the shortest path between two residues."""
@@ -211,8 +218,10 @@ class PathProperties:
     fixed_distances: list[float]
 
     # Sum of IDR contributions along the chosen path, in the same units as the
-    # graph weights (distance units if segment_length is None, otherwise segment count)
-    #   ... It can be thought of as the maximum end-to-end length of the IDR segments concatenated
+    # graph weights: distance units if segment_length is None, otherwise segment count.
+    #
+    # It can be thought of as the maximum end-to-end length of the IDR segments
+    # concatenated along the path.
     random_walk_contour_length: float
 
     # Where the original residues live in the topology graph
@@ -221,26 +230,36 @@ class PathProperties:
     e1: TopologyEdgeRef | None
     e2: TopologyEdgeRef | None
 
-    # Endpoint loop metadata, only populated if the start/end residue lies in a self-loop IDR
+    # Endpoint loop metadata, only populated if the start/end residue lies in a self-loop IDR.
     # Tuple format: (idx_within_loop, loop_length)
-    # ... note: the loop length is given in residues, *not* in segments
-    # ... to get the number of segments you have to add one
+    #
+    # The loop length is given in residues, not in segments.
+    # To get the number of segments you have to add one.
     start_loop: tuple[int, int] | None
     end_loop: tuple[int, int] | None
 
 
 def _find_node_of_residue(graph: nx.MultiGraph, i: int) -> str | None:
-    # First prefer real rigid-domain nodes over bookkeeping terminal nodes
+    """
+    Return the topology node containing residue i, if any.
+
+    Rigid-domain nodes are preferred over terminal bookkeeping nodes. This matters
+    for cases where residue 0 or residue n-1 lies inside a globular domain.
+    """
+
+    # First prefer real rigid-domain nodes over bookkeeping terminal nodes.
     for n, data in graph.nodes(data=True):
-        if n in {"start", "end"}:
+        if _is_terminus(graph, n):
             continue
+
         if "indices" in data and i in data["indices"]:
             return n
 
-    # Only fall back to start/end if no rigid domain contains the residue
+    # Only fall back to termini if no rigid domain contains the residue.
     for n, data in graph.nodes(data=True):
-        if n not in {"start", "end"}:
+        if not _is_terminus(graph, n):
             continue
+
         if "indices" in data and i in data["indices"]:
             return n
 
@@ -251,6 +270,7 @@ def _find_edge_of_residue(graph: nx.MultiGraph, i: int) -> TopologyEdgeRef | Non
     for u, v, k, data in graph.edges(keys=True, data=True):
         if int(data["start_idx"]) <= i <= int(data["end_idx"]):
             return (u, v, k)
+
     return None
 
 
@@ -293,7 +313,7 @@ def _anchor_candidates_for_residue(
 
     If the residue lies in a rigid node:
         - candidates are all anchors belonging to that topology node
-        - offset_cost is Euclidean distance to the anchor (normalized if requested)
+        - offset_cost is Euclidean distance to the anchor, normalized if requested
 
     If the residue lies in an IDR edge:
         - candidates are the two anchors of that IDR edge
@@ -304,7 +324,7 @@ def _anchor_candidates_for_residue(
     def normalize(distance: float) -> float:
         return distance if segment_length is None else distance / segment_length
 
-    # Residue lies in a rigid node
+    # Residue lies in a rigid node or terminal bookkeeping node.
     n = _find_node_of_residue(topology, i)
     if n is not None:
         candidates = []
@@ -313,7 +333,7 @@ def _anchor_candidates_for_residue(
             if topo_node != n:
                 continue
 
-            if n in {"start", "end"}:
+            if _is_terminus(topology, n):
                 offset_distance = 0.0
             else:
                 offset_distance = float(
@@ -328,7 +348,7 @@ def _anchor_candidates_for_residue(
 
         return candidates
 
-    # Residue lies in an IDR edge
+    # Residue lies in an IDR edge.
     e = _find_edge_of_residue(topology, i)
     if e is None:
         msg = f"Could not locate residue {i} in the topology graph"
@@ -342,7 +362,7 @@ def _anchor_candidates_for_residue(
     end_idx = int(data["end_idx"])
     loop = bool(data["loop"])
 
-    # contour distance from residue i to the two anchors along the IDR
+    # Contour distance from residue i to the two anchors along the IDR.
     left_offset = (i - start_idx + 1) * bond_length
     right_offset = (end_idx - i + 1) * bond_length
 
@@ -369,22 +389,25 @@ def _find_contour_edge_of_residue(
 
     So:
       - interior IDR residues map to their IDR edge
-      - residue 0 can map to a "start"-adjacent edge if that edge starts at 0
-      - residue N-1 can map to an "end"-adjacent edge if that edge ends at N-1
+      - a start-terminal residue can map to its adjacent terminal IDR edge
+      - an end-terminal residue can map to its adjacent terminal IDR edge
     """
     edge = _find_edge_of_residue(graph, i)
     if edge is not None:
         return edge
 
     node = _find_node_of_residue(graph, i)
-    if node not in {"start", "end"}:
+    if node is None or not _is_terminus(graph, node):
         return None
 
     matches: list[TopologyEdgeRef] = []
 
     for u, v, k, data in graph.edges(keys=True, data=True):
-        if (node == "start" and node in (u, v) and int(data["start_idx"]) == i) or (
-            node == "end" and node in (u, v) and int(data["end_idx"]) == i
+        if node not in (u, v):
+            continue
+
+        if (_is_start_terminus(graph, node) and int(data["start_idx"]) == i) or (
+            _is_end_terminus(graph, node) and int(data["end_idx"]) == i
         ):
             matches.append((u, v, k))
 
@@ -462,9 +485,9 @@ def get_path_properties(  # noqa: PLR0912, PLR0915
     contour_e1 = _find_contour_edge_of_residue(topology, i1)
     contour_e2 = _find_contour_edge_of_residue(topology, i2)
 
-    # Case 1: same rigid domain
-    # start/end are bookkeeping nodes, not rigid domains
-    if n1 is not None and n1 == n2 and n1 not in {"start", "end"}:
+    # Case 1: same rigid domain.
+    # Terminal nodes are bookkeeping nodes, not rigid domains.
+    if n1 is not None and n1 == n2 and not _is_terminus(topology, n1):
         dist = float(np.linalg.norm(pos[i2] - pos[i1]))
         weight = dist if segment_length is None else dist / segment_length
 
@@ -484,7 +507,7 @@ def get_path_properties(  # noqa: PLR0912, PLR0915
             end_loop=None,
         )
 
-    # Case 2: same contour edge
+    # Case 2: same contour edge.
     # This includes terminal residues when they lie on the adjacent terminal IDR.
     if contour_e1 is not None and contour_e1 == contour_e2:
         u, v, k = contour_e1
@@ -517,10 +540,6 @@ def get_path_properties(  # noqa: PLR0912, PLR0915
             end_loop=end_loop,
         )
 
-    # For the remaining cases, use the original node/edge classification
-    e1 = None if n1 is not None else _find_edge_of_residue(topology, i1)
-    e2 = None if n2 is not None else _find_edge_of_residue(topology, i2)
-
     start_candidates = _anchor_candidates_for_residue(
         topology,
         sp_graph,
@@ -540,8 +559,8 @@ def get_path_properties(  # noqa: PLR0912, PLR0915
 
     best: dict | None = None
 
-    for a1, start_offset, n1, e1, start_loop in start_candidates:
-        for a2, end_offset, n2, e2, end_loop in end_candidates:
+    for a1, start_offset, cand_n1, cand_e1, start_loop in start_candidates:
+        for a2, end_offset, cand_n2, cand_e2, end_loop in end_candidates:
             try:
                 node_path = nx.shortest_path(sp_graph, a1, a2, weight="weight")
                 path_cost = nx.shortest_path_length(sp_graph, a1, a2, weight="weight")
@@ -556,10 +575,10 @@ def get_path_properties(  # noqa: PLR0912, PLR0915
                     "total": total,
                     "start_offset": float(start_offset),
                     "end_offset": float(end_offset),
-                    "n1": n1,
-                    "n2": n2,
-                    "e1": e1,
-                    "e2": e2,
+                    "n1": cand_n1,
+                    "n2": cand_n2,
+                    "e1": cand_e1,
+                    "e2": cand_e2,
                     "start_loop": start_loop,
                     "end_loop": end_loop,
                 }
@@ -580,12 +599,15 @@ def get_path_properties(  # noqa: PLR0912, PLR0915
 
     for u, v, k in edge_path:
         data = sp_graph.edges[u, v, k]
+
         if data["kind"] == "idr":
-            # expressed in the same units as the shortest-path graph weight
+            # Expressed in the same units as the shortest-path graph weight.
             random_walk_contour_length += float(data["weight"])
+
         elif data["kind"] == "domain_shortcut":
-            # keep the physical shortcut distance, not the normalized weight
+            # Keep the physical shortcut distance, not the normalized weight.
             fixed_distances.append(float(data["distance"]))
+
         else:
             msg = f"Unknown shortest-path graph edge kind: {data['kind']!r}"
             raise ValueError(msg)
@@ -605,9 +627,10 @@ def get_path_properties(  # noqa: PLR0912, PLR0915
     if best["e1"] is not None and best["start_loop"] is None:
         random_walk_contour_length += start_offset
         start_offset = 0.0
+
     elif (
         best["n1"] is not None
-        and best["n1"] not in {"start", "end"}
+        and not _is_terminus(topology, best["n1"])
         and start_offset > 0.0
     ):
         fixed_distances.append(start_offset)
@@ -616,9 +639,10 @@ def get_path_properties(  # noqa: PLR0912, PLR0915
     if best["e2"] is not None and best["end_loop"] is None:
         random_walk_contour_length += end_offset
         end_offset = 0.0
+
     elif (
         best["n2"] is not None
-        and best["n2"] not in {"start", "end"}
+        and not _is_terminus(topology, best["n2"])
         and end_offset > 0.0
     ):
         fixed_distances.append(end_offset)
