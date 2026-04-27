@@ -447,9 +447,9 @@ class LammpsData:
 
     n_molecules: int
 
-    x_lims: list[float]
-    y_lims: list[float]
-    z_lims: list[float]
+    x_lims: list[float | None]
+    y_lims: list[float | None]
+    z_lims: list[float | None]
 
     n_atom_types: int | None = None
 
@@ -471,14 +471,14 @@ def initialize_lammps_data() -> LammpsData:
         bonds=[],
         masses=mass_section,
         groups=[],
-        x_lims=[0.0, 0.0],
-        y_lims=[0.0, 0.0],
-        z_lims=[0.0, 0.0],
+        x_lims=[None, None],
+        y_lims=[None, None],
+        z_lims=[None, None],
         n_molecules=0,
     )
 
 
-def add_proteins_to_lammps_data(
+def add_proteins_to_lammps_data(  # noqa: PLR0912, PLR0915
     lammps_data: LammpsData,
     prot_data: ProteinData,
     globular_domains: Iterable[GlobularDomain],
@@ -491,6 +491,7 @@ def add_proteins_to_lammps_data(
     offset_x: float = 0.0,
     offset_y: float = 0.0,
     offset_z: float = 0.0,
+    bond_cutoff: float | None = 10.0,
 ):
     if prot_data.sequence_three_letter is None:
         prot_data.sequence_three_letter = [
@@ -536,6 +537,21 @@ def add_proteins_to_lammps_data(
     y_hi = np.max(y_coords) + box_buffer + offset_y
     z_lo = np.min(z_coords) - box_buffer + offset_z
     z_hi = np.max(z_coords) + box_buffer + offset_z
+
+    if lammps_data.x_lims[0] is None:
+        lammps_data.x_lims[0] = x_lo
+    if lammps_data.x_lims[1] is None:
+        lammps_data.x_lims[1] = x_hi
+
+    if lammps_data.y_lims[0] is None:
+        lammps_data.y_lims[0] = y_lo
+    if lammps_data.y_lims[1] is None:
+        lammps_data.y_lims[1] = y_hi
+
+    if lammps_data.z_lims[0] is None:
+        lammps_data.z_lims[0] = z_lo
+    if lammps_data.z_lims[1] is None:
+        lammps_data.z_lims[1] = z_hi
 
     lammps_data.x_lims = [
         min(lammps_data.x_lims[0], x_lo),
@@ -592,12 +608,12 @@ def add_proteins_to_lammps_data(
 
     bond_id = len(lammps_data.bonds)
 
-    # Within globular domains, bonds are skipped
     for idx_protein in range(n_proteins_total):
         for idx_residue in range(n_residues - 1):
             first_rigid = check_if_idx_is_rigid(idx_residue)
             second_rigid = check_if_idx_is_rigid(idx_residue + 1)
 
+            # Within globular domains, bonds are skipped
             # if both residues are rigid, we skip the bond
             if first_rigid and second_rigid:
                 continue
@@ -605,7 +621,16 @@ def add_proteins_to_lammps_data(
             atom_id_1 = (idx_residue + 1) + n_residues * idx_protein
             atom_id_2 = (idx_residue + 2) + n_residues * idx_protein
 
-            # in this case we are either in an IDR or we are connecting a globular domain to an IDR
+            # If a bond_cutoff is set, we do ot put bonds betwee
+            # subsequent residues which are separated by more than the bond cutoff
+            if bond_cutoff is not None:
+                # Check the distance
+                pos1 = np.array(protein_positions[idx_protein][idx_residue])
+                pos2 = np.array(protein_positions[idx_protein][idx_residue + 1])
+                if np.linalg.norm(pos2 - pos1) > bond_cutoff:
+                    continue
+
+            # now we know, we are either in an IDR or we are connecting a globular domain to an IDR
             lammps_data.bonds.append(
                 LammpsData.BondRow(
                     bond_id=bond_id + 1,
