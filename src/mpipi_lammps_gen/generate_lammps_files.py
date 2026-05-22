@@ -675,8 +675,12 @@ def generate_lammps_data(
     n_proteins_x: int = 1,
     n_proteins_y: int = 1,
     n_proteins_z: int = 1,
+    n_proteins_max: int = 1,
     grid_buffer: float = 0.0,
     box_buffer: float = 0.0,
+    offset_x: float = 0.0,
+    offset_y: float = 0.0,
+    offset_z: float = 0.0,
 ) -> LammpsData:
     lammps_data = initialize_lammps_data()
 
@@ -687,8 +691,12 @@ def generate_lammps_data(
         n_proteins_x=n_proteins_x,
         n_proteins_y=n_proteins_y,
         n_proteins_z=n_proteins_z,
+        n_proteins_max=n_proteins_max,
         grid_buffer=grid_buffer,
         box_buffer=box_buffer,
+        offset_x=offset_x,
+        offset_y=offset_y,
+        offset_z=offset_z,
     )
 
     return lammps_data
