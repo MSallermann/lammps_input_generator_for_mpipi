@@ -675,7 +675,7 @@ def generate_lammps_data(
     n_proteins_x: int = 1,
     n_proteins_y: int = 1,
     n_proteins_z: int = 1,
-    n_proteins_max: int = 1,
+    n_proteins_max: int | None = None,
     grid_buffer: float = 0.0,
     box_buffer: float = 0.0,
     offset_x: float = 0.0,
